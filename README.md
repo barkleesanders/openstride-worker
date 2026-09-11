@@ -14,8 +14,9 @@ MIT licensed. Not affiliated with Runna or Strava.
 - Optionally import recent runs from your own Strava account.
 - Server-rendered, responsive interface with no client JavaScript or external assets.
 
-This is a **single-person installation**. Everyone with the installation password
-can access and change all its data. There are no separate user accounts.
+This is a **single-person installation**. Cloudflare Access can restrict browser
+login to one email address using emailed one-time codes. API and MCP clients use
+a separate bearer token with access to all installation data.
 
 ## Run locally
 
@@ -52,7 +53,7 @@ npx wrangler login
 npx wrangler d1 create openstride --config wrangler.jsonc
 ```
 
-Replace the placeholder `database_id` in `wrangler.jsonc` with the ID printed by
+Replace the deployment's `database_id` in `wrangler.jsonc` with the ID printed by
 that command. If you change the database name, update `database_name` too. Choose
 an available Worker `name` if `openstride` is already used in your account.
 
@@ -68,9 +69,17 @@ npm run deploy
 ```
 
 Paste the generated password at the secret prompt. Never put it in `wrangler.jsonc`
-or source code. Open the HTTPS `workers.dev` URL printed after deployment.
-Use `runner` and that production password. A token shorter than 32 characters
-fails closed. Basic authentication must only be used over HTTPS outside localhost.
+or source code. Set your own custom domain in `routes`; preview and workers.dev
+hostnames are disabled. A token shorter than 32 characters fails closed.
+
+For email-code login, create a Cloudflare Access self-hosted application for
+`YOUR-HOST/app`, select One-time PIN, and allow only your email. Store
+`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, and `OWNER_EMAIL` as Worker secrets.
+The Worker verifies the assertion signature, issuer, audience, expiry, and email.
+Partial configuration fails closed; Basic authentication is disabled in Access mode.
+Leave `/api/*` and `/mcp` reachable for bearer-authenticated clients. Browser exports
+use `/app/*` and remain protected by Access. With no Access configuration, local
+Basic authentication uses username `runner` and `APP_TOKEN`.
 
 Cloudflare's documented free limits, checked September 10, 2026:
 
@@ -121,6 +130,8 @@ complete workouts.
 ## Optional Strava import
 
 Create your own API application at [Strava API settings](https://www.strava.com/settings/api).
+Strava currently requires a subscription to create an API application; existing
+applications can be reused. See [Strava getting started](https://developers.strava.com/docs/getting-started/).
 Configure its authorization callback domain to match your deployment hostname.
 Set these additional secrets:
 
@@ -130,7 +141,7 @@ npx wrangler secret put STRAVA_CLIENT_SECRET --config wrangler.jsonc
 npx wrangler secret put STRAVA_REDIRECT_URI --config wrangler.jsonc
 ```
 
-Use `https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/app/strava/callback` for the
+Use `https://YOUR-HOST/app/strava/callback` for the
 redirect URI. For local development, add the same variables to `.dev.vars` and
 use a localhost callback accepted by your Strava app settings.
 
@@ -143,6 +154,25 @@ application restrictions still apply. See [Strava authentication](https://develo
 
 Tokens are encrypted with AES-GCM using a key derived from `APP_TOKEN`. Changing
 that password makes existing tokens unreadable: reconnect Strava afterward.
+
+### Existing Strava CLI bridge
+
+If an existing `strava-pp-cli` installation owns your Strava tokens, keep refreshes
+there and run `node scripts/strava-bridge.mjs /path/to/private/bridge.json` hourly.
+The private config contains `url` (your HTTPS origin), `token` (`APP_TOKEN`), and
+optionally `cli` (absolute CLI path). Never commit this file.
+
+The first successful run imports history, capped at 4,000 source activities;
+later runs refresh the last 90 days. Reaching the cap fails visibly without claiming
+a complete import. Only Run, TrailRun, and VirtualRun records are sent. Stable
+Strava IDs prevent duplicates. Imports update metadata but do not remove older
+records or mark plan sessions complete. The dashboard shows the last receipt time.
+The bridge requires the host to be online; stop its scheduler to pause sync.
+
+`POST /api/activities/import` and MCP `import_activities` accept batches of up to
+100 validated run records. Apple Watch workouts can reach this bridge through
+Strava's Health integration on iPhone; this does not import sleep, HRV, or the
+entire Apple Health database.
 Disconnect removes the local connection; revoke application access in Strava to
 revoke its authorization there. Previously imported activity records remain.
 

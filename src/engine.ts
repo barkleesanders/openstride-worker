@@ -189,7 +189,8 @@ function fold(line: string): string {
   let part = '';
   let bytes = 0;
   for (const char of line) {
-    const codePoint = char.codePointAt(0)!;
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined) continue;
     const size = codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
     if (bytes + size > 75) {
       lines.push(part);
@@ -230,11 +231,12 @@ export function toCalendar(plan: Plan): string {
     );
   }
   lines.push('END:VCALENDAR');
-  return lines.map(fold).join('\r\n') + '\r\n';
+  return `${lines.map(fold).join('\r\n')}\r\n`;
 }
 function csvCell(value: unknown): string {
   let s = String(value ?? '');
   // Neutralize spreadsheet formulas even after leading whitespace/control chars.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Control-prefix detection prevents spreadsheet formula injection.
   if (/^[\s\u0000-\u001f]*[=+@-]/.test(s) || /^[\t\r\n]/.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 }
@@ -268,5 +270,5 @@ export function toCsv(plan: Plan): string {
       w.effort,
       w.notes,
     ]);
-  return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  return `${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }

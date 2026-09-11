@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
+
 try {
   writeFileSync('.dev.vars', `APP_TOKEN=${randomBytes(32).toString('hex')}\n`, {
     flag: 'wx',

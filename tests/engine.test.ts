@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generatePlan, planConfigSchema, toCalendar, toCsv } from '../src/engine';
 import type { PlanConfig } from '../src/types';
+
 const config: PlanConfig = {
   name: 'Test',
   goal: '10k',
@@ -87,7 +88,7 @@ describe('original plan engine', () => {
     expect(generatePlan(config, 'x').workouts.every((w) => !w.paceMinSeconds)).toBe(true);
     expect(
       generatePlan({ ...config, recent5kMinutes: 25 }, 'x').workouts.every(
-        (w) => w.paceMinSeconds && w.paceMaxSeconds! > w.paceMinSeconds,
+        (w) => w.paceMinSeconds && w.paceMaxSeconds && w.paceMaxSeconds > w.paceMinSeconds,
       ),
     ).toBe(true);
   });
@@ -102,7 +103,7 @@ describe('original plan engine', () => {
   it('escapes CSV formulas and calendar injection with UTF8 line folding', () => {
     const p = generatePlan(config, 'plan\nINJECT', '2028-01-01T00:00:00Z');
     p.workouts[0].notes = '=HYPERLINK("bad")';
-    p.workouts[0].title = '🏃'.repeat(50) + '\r\nBEGIN:VEVENT;bad,yes';
+    p.workouts[0].title = `${'🏃'.repeat(50)}\r\nBEGIN:VEVENT;bad,yes`;
     const csv = toCsv(p);
     expect(csv).toContain('"\'=HYPERLINK(""bad"")"');
     const ics = toCalendar(p);

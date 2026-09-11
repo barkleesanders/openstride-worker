@@ -59,7 +59,7 @@ export function Layout({ title, children }: { title: string; children: Child }) 
   );
 }
 
-export function Home() {
+export function Home({ accessLogin = false }: { accessLogin?: boolean }) {
   return (
     <>
       <section class="hero">
@@ -82,8 +82,9 @@ export function Home() {
           </a>
         </div>
         <p class="quiet login-note">
-          Your private space uses username <strong>runner</strong> and the password set by your
-          deployment’s APP_TOKEN.
+          {accessLogin
+            ? 'Sign in with the one-time code sent to your email by Cloudflare Access.'
+            : 'Sign in with username runner and your deployment password.'}
         </p>
       </section>
       <section class="home-grid" aria-label="How it works">
@@ -133,11 +134,13 @@ export function Dashboard({
   activities,
   stravaConfigured,
   stravaConnected,
+  bridgeSyncedAt,
 }: {
   plans: Plan[];
   activities: Activity[];
   stravaConfigured: boolean;
   stravaConnected: boolean;
+  bridgeSyncedAt?: string;
 }) {
   const completed = plans.reduce(
     (sum, plan) => sum + plan.workouts.filter((workout) => workout.status === 'completed').length,
@@ -270,7 +273,19 @@ export function Dashboard({
         <section class="section integration" id="connections">
           <span class="eyebrow">Connected running</span>
           <h2>Bring your runs along.</h2>
-          {stravaConnected ? (
+          {bridgeSyncedAt ? (
+            <>
+              <p class="status-pill">Strava sync connected</p>
+              <p>
+                Your activity bridge sends running workouts automatically. Last received:{' '}
+                {bridgeSyncedAt}.
+              </p>
+              <p class="quiet">
+                Imported runs stay separate from planned sessions. Sync includes run date, distance,
+                and duration.
+              </p>
+            </>
+          ) : stravaConnected ? (
             <>
               <p class="status-pill">Strava connected</p>
               <p>
@@ -481,9 +496,9 @@ export function PlanPage({ plan, message }: { plan: Plan; message?: string }) {
           <p class="lead">{plan.config.weeks} weeks of making time for yourself.</p>
         </div>
         <div class="export-links">
-          <a href={`/api/plans/${plan.id}/calendar.ics`}>Download calendar ↗</a>
-          <a href={`/api/plans/${plan.id}/export.csv`}>Download spreadsheet ↗</a>
-          <a href={`/api/plans/${plan.id}`}>View plan data ↗</a>
+          <a href={`/app/plans/${plan.id}/calendar.ics`}>Download calendar ↗</a>
+          <a href={`/app/plans/${plan.id}/export.csv`}>Download spreadsheet ↗</a>
+          <a href={`/app/plans/${plan.id}/data`}>View plan data ↗</a>
         </div>
       </section>
       {message && (

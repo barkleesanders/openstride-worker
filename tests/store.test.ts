@@ -4,11 +4,11 @@ import { getPlatformProxy, type PlatformProxy } from 'wrangler';
 import { generatePlan } from '../src/engine';
 import {
   ConflictError,
-  MissingError,
   easePlan,
   getPlan,
   listActivities,
   listPlans,
+  MissingError,
   saveActivities,
   savePlan,
   updateWorkout,
@@ -116,7 +116,8 @@ describe('D1 persistence', () => {
     const start = plan.workouts[1].date;
     const eased = await easePlan(db, plan.id, start);
     for (const original of before.workouts) {
-      const changed = eased.workouts.find((w) => w.id === original.id)!;
+      const changed = eased.workouts.find((w) => w.id === original.id);
+      if (!changed) throw new Error('Easing removed a workout');
       if (original.date < start || original.status !== 'planned' || original.type === 'race')
         expect(changed).toEqual(original);
       else {

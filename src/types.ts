@@ -49,6 +49,9 @@ export type Bindings = {
   DB: D1Database;
   ASSETS: Fetcher;
   APP_TOKEN: string;
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
+  OWNER_EMAIL?: string;
   STRAVA_CLIENT_ID?: string;
   STRAVA_CLIENT_SECRET?: string;
   STRAVA_REDIRECT_URI?: string;

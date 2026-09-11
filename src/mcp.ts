@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { planConfigSchema } from './engine';
-import { activityInputSchema, dateSchema, workoutPatchSchema } from './store';
+import {
+  activityInputSchema,
+  dateSchema,
+  importActivitiesSchema,
+  workoutPatchSchema,
+} from './store';
 
 const id = z.string().min(1).max(100);
 export const toolSchemas = {
@@ -11,6 +16,7 @@ export const toolSchemas = {
   ease_plan: z.object({ planId: id, startDate: dateSchema }).strict(),
   list_activities: z.object({}).strict(),
   log_activity: activityInputSchema,
+  import_activities: importActivitiesSchema,
   export_calendar: z.object({ planId: id }).strict(),
   export_csv: z.object({ planId: id }).strict(),
   strava_status: z.object({}).strict(),
@@ -26,6 +32,8 @@ const descriptions: Record<string, string> = {
     'Reduce future planned training by 20 percent and remove intensity. Explicit user choice; the same start date is idempotent.',
   list_activities: 'List the latest 100 activities.',
   log_activity: 'Record a manual activity.',
+  import_activities:
+    'Import up to 100 Strava run records by stable source ID. Repeated imports update existing records.',
   export_calendar: 'Export a plan as iCalendar text.',
   export_csv: 'Export a plan as CSV text.',
   strava_status: 'Check whether Strava is configured and connected.',

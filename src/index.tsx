@@ -3,17 +3,20 @@ import { basicAuth } from 'hono/basic-auth';
 import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie';
-import { secureHeaders } from 'hono/secure-headers';
 import { HTTPException } from 'hono/http-exception';
+import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
+import { isAccessConfigured, verifyAccess } from './access';
 import { generatePlan, planConfigSchema, toCalendar, toCsv } from './engine';
-import { handleMcp, toolSchemas, type ToolName } from './mcp';
+import { handleMcp, type ToolName, toolSchemas } from './mcp';
 import {
   activityInputSchema,
   ConflictError,
   dateSchema,
   easePlan,
   getPlan,
+  importActivities,
+  importActivitiesSchema,
   listActivities,
   listPlans,
   MissingError,
@@ -66,14 +69,25 @@ app.use('*', async (c, next) => {
   if (!c.env.APP_TOKEN || c.env.APP_TOKEN.length < 32)
     return c.json({ error: 'Set APP_TOKEN to a random secret of at least 32 characters.' }, 503);
   const bearer = c.req.header('Authorization')?.toLowerCase().startsWith('bearer ') ?? false;
+  const accessMode = Boolean(
+    c.env.CF_ACCESS_TEAM_DOMAIN || c.env.CF_ACCESS_AUD || c.env.OWNER_EMAIL,
+  );
+  if (accessMode && !isAccessConfigured(c.env))
+    return c.json({ error: 'Cloudflare Access configuration is incomplete.' }, 503);
   const middleware: MiddlewareHandler<{ Bindings: Bindings }> =
-    bearer || path === '/mcp'
+    bearer || path === '/mcp' || (accessMode && (path === '/api' || path.startsWith('/api/')))
       ? bearerAuth<{ Bindings: Bindings }>({ token: c.env.APP_TOKEN })
-      : (basicAuth({
-          username: 'runner',
-          password: c.env.APP_TOKEN,
-          realm: 'OpenStride',
-        }) as MiddlewareHandler<{ Bindings: Bindings }>);
+      : accessMode
+        ? async (context, proceed) => {
+            if (!(await verifyAccess(context.req.raw, context.env)))
+              throw new HTTPException(401, { message: 'Sign in through Cloudflare Access.' });
+            return proceed();
+          }
+        : (basicAuth({
+            username: 'runner',
+            password: c.env.APP_TOKEN,
+            realm: 'OpenStride',
+          }) as MiddlewareHandler<{ Bindings: Bindings }>);
   return middleware(c, async () => {
     const origin = c.req.header('Origin');
     if (origin && origin !== new URL(c.req.url).origin) {
@@ -97,7 +111,14 @@ app.use('*', async (c, next) => {
 const connection = (env: Bindings) =>
   env.DB.prepare("SELECT value FROM connection WHERE id='strava'").first<{ value: string }>();
 async function stravaStatus(env: Bindings) {
-  return { configured: strava.configured(env), connected: !!(await connection(env)) };
+  const bridge = await env.DB.prepare(
+    "SELECT updated_at FROM connection WHERE id='activity_bridge'",
+  ).first<{ updated_at: string }>();
+  return {
+    configured: strava.configured(env),
+    connected: !!(await connection(env)),
+    bridgeSyncedAt: bridge?.updated_at,
+  };
 }
 async function persistTokens(env: Bindings, tokens: strava.StravaTokens) {
   await env.DB.prepare(
@@ -156,7 +177,7 @@ const easeSchema = z.object({ startDate: dateSchema }).strict();
 app.get('/', (c) =>
   c.html(
     <Layout title="Your running, your way">
-      <Home />
+      <Home accessLogin={isAccessConfigured(c.env)} />
     </Layout>,
   ),
 );
@@ -175,6 +196,7 @@ app.get('/app', async (c) => {
         activities={activities}
         stravaConfigured={status.configured}
         stravaConnected={status.connected}
+        bridgeSyncedAt={status.bridgeSyncedAt}
       />
     </Layout>,
   );
@@ -264,17 +286,21 @@ app.post('/api/plans/:id/ease', async (c) =>
     ),
   ),
 );
-app.get('/api/plans/:id/calendar.ics', async (c) => {
+app.on('GET', ['/api/plans/:id/calendar.ics', '/app/plans/:id/calendar.ics'], async (c) => {
   c.header('Content-Type', 'text/calendar; charset=utf-8');
   c.header('Content-Disposition', 'attachment; filename="openstride.ics"');
   return c.body(toCalendar(await getPlan(c.env.DB, c.req.param('id'))));
 });
-app.get('/api/plans/:id/export.csv', async (c) => {
+app.on('GET', ['/api/plans/:id/export.csv', '/app/plans/:id/export.csv'], async (c) => {
   c.header('Content-Type', 'text/csv; charset=utf-8');
   c.header('Content-Disposition', 'attachment; filename="openstride.csv"');
   return c.body(toCsv(await getPlan(c.env.DB, c.req.param('id'))));
 });
 app.get('/api/activities', async (c) => c.json(await listActivities(c.env.DB)));
+app.post('/api/activities/import', async (c) =>
+  c.json(await importActivities(c.env.DB, importActivitiesSchema.parse(await jsonBody(c.req.raw)))),
+);
+app.get('/app/plans/:id/data', async (c) => c.json(await getPlan(c.env.DB, c.req.param('id'))));
 app.post('/api/activities', async (c) =>
   c.json(await logActivity(c.env, await jsonBody(c.req.raw)), 201),
 );
@@ -362,6 +388,8 @@ async function callTool(env: Bindings, name: ToolName, raw: unknown): Promise<un
       return listActivities(env.DB);
     case 'log_activity':
       return logActivity(env, raw);
+    case 'import_activities':
+      return importActivities(env.DB, importActivitiesSchema.parse(raw));
     case 'export_calendar':
       return toCalendar(await getPlan(env.DB, toolSchemas.export_calendar.parse(raw).planId));
     case 'export_csv':

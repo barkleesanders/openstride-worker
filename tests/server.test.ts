@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getPlatformProxy, type PlatformProxy } from 'wrangler';
 import app from '../src/index';
 import type { Bindings, Plan, PlanConfig } from '../src/types';
+
 const TOKEN = 'test-only-openstride-secret-not-for-deployment-12345';
 const ORIGIN = 'https://openstride.test';
 const basic = `Basic ${btoa(`runner:${TOKEN}`)}`;
@@ -79,6 +80,74 @@ beforeEach(async () => {
 });
 
 describe('HTTP security and workflow with actual D1', () => {
+  it('imports stable Strava IDs without duplicating runs and rejects arbitrary source IDs', async () => {
+    const activity = {
+      id: 'strava:123',
+      source: 'strava',
+      date: '2026-09-01',
+      name: 'Test run',
+      distanceKm: 5,
+      durationMinutes: 30,
+    };
+    expect((await json('/api/activities/import', { activities: [activity] })).status).toBe(200);
+    expect(
+      (await json('/api/activities/import', { activities: [{ ...activity, distanceKm: 6 }] }))
+        .status,
+    ).toBe(200);
+    const activities = await (
+      await request('/api/activities', { headers: { Authorization: bearer } })
+    ).json();
+    expect(activities).toEqual([{ ...activity, distanceKm: 6 }]);
+    expect(
+      (await json('/api/activities/import', { activities: [{ ...activity, id: 'manual:123' }] }))
+        .status,
+    ).toBe(400);
+    const integrations = await (
+      await request('/api/integrations', { headers: { Authorization: bearer } })
+    ).json();
+    expect(integrations).toEqual(
+      expect.objectContaining({
+        strava: expect.objectContaining({ bridgeSyncedAt: expect.any(String) }),
+      }),
+    );
+  });
+  it('fails closed for partial Access configuration and rejects Basic in Access mode', async () => {
+    const accessEnv = {
+      ...env,
+      CF_ACCESS_TEAM_DOMAIN: 'example.cloudflareaccess.com',
+      CF_ACCESS_AUD: 'app-audience',
+      OWNER_EMAIL: 'runner@example.test',
+    };
+    expect(
+      (
+        await request(
+          '/app',
+          { headers: { Authorization: basic } },
+          { ...env, CF_ACCESS_TEAM_DOMAIN: accessEnv.CF_ACCESS_TEAM_DOMAIN },
+        )
+      ).status,
+    ).toBe(503);
+    for (const path of ['/app', '/api/plans', '/mcp']) {
+      expect(
+        (
+          await request(
+            path,
+            {
+              headers: {
+                Authorization: basic,
+                'Cf-Access-Authenticated-User-Email': accessEnv.OWNER_EMAIL,
+              },
+            },
+            accessEnv,
+          )
+        ).status,
+      ).toBe(path === '/app' ? 401 : 400);
+    }
+    expect(
+      (await request('/api/plans', { headers: { Authorization: bearer } }, accessEnv)).status,
+    ).toBe(200);
+    expect(await (await request('/', {}, accessEnv)).text()).toContain('one-time code');
+  });
   it('serves public landing while protected routes fail closed without a configured secret', async () => {
     expect((await request('/', {}, { ...env, APP_TOKEN: '' })).status).toBe(200);
     for (const path of ['/app', '/api/plans', '/mcp'])
@@ -162,7 +231,10 @@ describe('HTTP security and workflow with actual D1', () => {
   it('supports the actual browser form contract including selected weekdays and workout logging', async () => {
     const form = new URLSearchParams();
     for (const [key, value] of Object.entries(config)) {
-      if (Array.isArray(value)) value.forEach((v) => form.append(key, String(v)));
+      if (Array.isArray(value))
+        value.forEach((v) => {
+          form.append(key, String(v));
+        });
       else form.set(key, String(value));
     }
     form.set('recent5kMinutes', '');
@@ -172,7 +244,8 @@ describe('HTTP security and workflow with actual D1', () => {
       body: form,
     });
     expect(created.status).toBe(303);
-    const path = created.headers.get('Location')!;
+    const path = created.headers.get('Location');
+    if (!path) throw new Error('Missing plan redirect');
     const plan: Plan = await (
       await request(path.replace('/app/', '/api/'), { headers: { Authorization: bearer } })
     ).json();
@@ -220,21 +293,53 @@ describe('HTTP security and workflow with actual D1', () => {
   it('clears logged numeric fields through API nulls and browser blank fields', async () => {
     const plan = await createPlan();
     const endpoint = `/api/plans/${plan.id}/workouts/${plan.workouts[0].id}`;
-    const logged = { status: 'completed', actualKm: 4.5, actualMinutes: 28, effort: 6, notes: 'Keep this note' };
+    const logged = {
+      status: 'completed',
+      actualKm: 4.5,
+      actualMinutes: 28,
+      effort: 6,
+      notes: 'Keep this note',
+    };
     expect((await json(endpoint, logged, 'PATCH')).status).toBe(200);
     // Omitted values preserve existing readings; explicit null clears them.
     expect((await json(endpoint, { notes: 'Keep this note' }, 'PATCH')).status).toBe(200);
-    let saved: Plan = await (await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })).json();
+    let saved: Plan = await (
+      await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })
+    ).json();
     expect(saved.workouts[0]).toMatchObject(logged);
-    expect((await json(endpoint, { actualKm: null, actualMinutes: null, effort: null }, 'PATCH')).status).toBe(200);
-    saved = await (await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })).json();
-    for (const key of ['actualKm', 'actualMinutes', 'effort']) expect(saved.workouts[0]).not.toHaveProperty(key);
+    expect(
+      (await json(endpoint, { actualKm: null, actualMinutes: null, effort: null }, 'PATCH')).status,
+    ).toBe(200);
+    saved = await (
+      await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })
+    ).json();
+    for (const key of ['actualKm', 'actualMinutes', 'effort'])
+      expect(saved.workouts[0]).not.toHaveProperty(key);
     expect(saved.workouts[0]).toMatchObject({ status: 'completed', notes: 'Keep this note' });
     expect((await json(endpoint, logged, 'PATCH')).status).toBe(200);
-    const blankForm = new URLSearchParams({ planId: plan.id, status: 'completed', date: plan.workouts[0].date, actualKm: '', actualMinutes: '', effort: '', notes: 'Keep this note' });
-    expect((await request(`/app/workouts/${plan.workouts[0].id}`, { method: 'POST', headers: { Authorization: basic, Origin: ORIGIN }, body: blankForm })).status).toBe(303);
-    saved = await (await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })).json();
-    for (const key of ['actualKm', 'actualMinutes', 'effort']) expect(saved.workouts[0]).not.toHaveProperty(key);
+    const blankForm = new URLSearchParams({
+      planId: plan.id,
+      status: 'completed',
+      date: plan.workouts[0].date,
+      actualKm: '',
+      actualMinutes: '',
+      effort: '',
+      notes: 'Keep this note',
+    });
+    expect(
+      (
+        await request(`/app/workouts/${plan.workouts[0].id}`, {
+          method: 'POST',
+          headers: { Authorization: basic, Origin: ORIGIN },
+          body: blankForm,
+        })
+      ).status,
+    ).toBe(303);
+    saved = await (
+      await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })
+    ).json();
+    for (const key of ['actualKm', 'actualMinutes', 'effort'])
+      expect(saved.workouts[0]).not.toHaveProperty(key);
     expect(saved.workouts[0]).toMatchObject({ status: 'completed', notes: 'Keep this note' });
   });
 });

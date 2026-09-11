@@ -440,13 +440,13 @@ textarea {
 textarea {
   resize: vertical;
 }
+.field-help {
+  margin-bottom: 20px;
+}
 label .field-help {
   font-weight: 400;
   margin-top: 0;
   font-size: 0.78rem;
-}
-.field-help {
-  margin-bottom: 20px;
 }
 .day-picker {
   display: grid;
@@ -538,7 +538,7 @@ label .field-help {
   margin: 0;
   font-size: 0.95rem;
 }
-.week-heading > span {
+.week-heading > :where(span) {
   font-size: 0.8rem;
   color: var(--muted);
 }

@@ -60,6 +60,32 @@ const activitySchema = activityInputSchema.extend({
   distanceKm: z.number().finite().nonnegative(),
   durationMinutes: z.number().finite().nonnegative(),
 });
+export const importActivitiesSchema = z
+  .object({
+    activities: z
+      .array(
+        activityInputSchema.extend({
+          id: z.string().regex(/^strava:[0-9]{1,20}$/),
+          source: z.literal('strava'),
+        }),
+      )
+      .max(100),
+  })
+  .strict();
+export async function importActivities(
+  db: D1Database,
+  input: z.infer<typeof importActivitiesSchema>,
+) {
+  await saveActivities(db, input.activities);
+  const syncedAt = new Date().toISOString();
+  await db
+    .prepare(
+      "INSERT INTO connection(id,value,updated_at) VALUES('activity_bridge',?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+    )
+    .bind(JSON.stringify({ syncedAt, imported: input.activities.length }), syncedAt)
+    .run();
+  return { imported: input.activities.length, syncedAt };
+}
 type PlanRow = { data: string; revision: number };
 export class ConflictError extends Error {}
 export class MissingError extends Error {}
