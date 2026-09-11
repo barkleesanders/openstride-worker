@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { planConfigSchema } from './engine';
 import type { Activity, PlanConfig } from './types';
+import { distanceText } from './units';
 
 export const PLANNER_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast' as const;
 export type PlannerAI = {
@@ -207,7 +208,12 @@ export async function proposePlan(ai: PlannerAI, input: PlannerInput, now = new 
     ) {
       throw new Error('constraints');
     }
-    return { ...recommendation, model: PLANNER_MODEL, activitySummary };
+    return {
+      ...recommendation,
+      rationale: distanceText(recommendation.rationale),
+      model: PLANNER_MODEL,
+      activitySummary,
+    };
   } catch {
     throw new PlannerError('invalid_output');
   }

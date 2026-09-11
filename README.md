@@ -5,6 +5,15 @@ transparent training rules, optional Worker LLM recommendations, and calendar sy
 Manual planning does not require AI or a Runna account.
 MIT licensed. Not affiliated with Runna or Strava.
 
+## Latest Changes
+
+### September 11, 2026
+
+- Worker AI recommendations use recent runs and connected calendar availability.
+- Google Calendar bridge refreshes availability and reconciles opted-in workouts.
+- Miles lead distances and paces; kilometers follow. Forms support both units.
+- Calendar and CSV exports include miles before kilometers. API storage remains metric.
+
 ## Features
 
 - Build 4–24 week plans for a running habit, 5K, 10K, half marathon, or marathon preparation.
@@ -15,8 +24,8 @@ MIT licensed. Not affiliated with Runna or Strava.
 - Explicitly reduce future training by 20%; completed sessions stay intact.
 - Download iCalendar and CSV files, and access your plans through a JSON API or MCP.
 - Optionally import recent runs from your own Strava account.
-- Server-rendered interface with no authored client JavaScript. Cloudflare may inject
-  its analytics beacon according to the zone configuration.
+- Server-rendered interface with a small script for distance-unit conversion. Cloudflare may
+  inject its analytics beacon according to the zone configuration.
 
 This is a **single-person installation**. Cloudflare Access can restrict browser
 login to one email address using emailed one-time codes. API and MCP clients use

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Plan, PlanConfig, Workout } from './types';
+import { distance, distanceText, miles } from './units';
 
 const DAY = 86_400_000;
 const validDate = (s: string) =>
@@ -223,8 +224,8 @@ export function toCalendar(plan: Plan): string {
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${w.date.replace(/-/g, '')}`,
       `DTEND;VALUE=DATE:${end.replace(/-/g, '')}`,
-      `SUMMARY:${escapeIcs(`${w.title} · ${w.distanceKm} km`)}`,
-      `DESCRIPTION:${escapeIcs(`${w.description}\nStatus: ${w.status}${w.notes ? `\nNotes: ${w.notes}` : ''}`)}`,
+      `SUMMARY:${escapeIcs(`${w.title} · ${distance(w.distanceKm)}`)}`,
+      `DESCRIPTION:${escapeIcs(`${distanceText(w.description)}\nStatus: ${w.status}${w.notes ? `\nNotes: ${w.notes}` : ''}`)}`,
       `STATUS:${w.status === 'skipped' ? 'CANCELLED' : 'CONFIRMED'}`,
       'TRANSP:TRANSPARENT',
       'END:VEVENT',
@@ -247,9 +248,11 @@ export function toCsv(plan: Plan): string {
       'week',
       'type',
       'title',
+      'distance_miles',
       'distance_km',
       'description',
       'status',
+      'actual_miles',
       'actual_km',
       'actual_minutes',
       'effort',
@@ -262,9 +265,11 @@ export function toCsv(plan: Plan): string {
       w.week,
       w.type,
       w.title,
+      miles(w.distanceKm),
       w.distanceKm,
-      w.description,
+      distanceText(w.description),
       w.status,
+      w.actualKm === undefined ? undefined : miles(w.actualKm),
       w.actualKm,
       w.actualMinutes,
       w.effort,

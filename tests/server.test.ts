@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getPlatformProxy, type PlatformProxy } from 'wrangler';
 import app from '../src/index';
-import type { Bindings, Plan, PlanConfig } from '../src/types';
+import type { Activity, Bindings, Plan, PlanConfig } from '../src/types';
 
 const TOKEN = 'test-only-openstride-secret-not-for-deployment-12345';
 const ORIGIN = 'https://openstride.test';
@@ -94,7 +94,7 @@ describe('HTTP security and workflow with actual D1', () => {
       (await json('/api/activities/import', { activities: [{ ...activity, distanceKm: 6 }] }))
         .status,
     ).toBe(200);
-    const activities = await (
+    const activities: Activity[] = await (
       await request('/api/activities', { headers: { Authorization: bearer } })
     ).json();
     expect(activities).toEqual([{ ...activity, distanceKm: 6 }]);
@@ -162,7 +162,7 @@ describe('HTTP security and workflow with actual D1', () => {
     expect(read.status).toBe(200);
     expect(read.headers.get('Cache-Control')).toBe('no-store');
     expect(read.headers.get('Content-Security-Policy')).toContain(
-      'script-src https://static.cloudflareinsights.com',
+      "script-src 'self' https://static.cloudflareinsights.com",
     );
   });
   it('requires same-origin browser mutations and rejects cross-origin bearer requests', async () => {
@@ -470,5 +470,87 @@ describe('AI and calendar workflow', () => {
       bindings,
     );
     expect(limited.status).toBe(429);
+  });
+});
+
+describe('browser distance units', () => {
+  const formPost = (path: string, form: URLSearchParams) =>
+    request(path, {
+      method: 'POST',
+      headers: { Authorization: basic, Origin: ORIGIN },
+      body: form,
+    });
+  it('accepts miles on activity and workout forms while preserving metric API data', async () => {
+    const logged = await formPost(
+      '/app/activities',
+      new URLSearchParams({
+        name: 'Mile test',
+        date: '2026-09-11',
+        distanceKm: '3.1',
+        distanceUnit: 'mi',
+        durationMinutes: '30',
+      }),
+    );
+    expect(logged.status).toBe(303);
+    const activities: Activity[] = await (
+      await request('/api/activities', { headers: { Authorization: bearer } })
+    ).json();
+    expect(activities[0].distanceKm).toBe(4.99);
+    const plan = await createPlan();
+    const saved = await formPost(
+      `/app/workouts/${plan.workouts[0].id}`,
+      new URLSearchParams({
+        planId: plan.id,
+        actualKm: '2',
+        distanceUnit: 'mi',
+        status: 'completed',
+      }),
+    );
+    expect(saved.status).toBe(303);
+    const updated: Plan = await (
+      await request(`/api/plans/${plan.id}`, { headers: { Authorization: bearer } })
+    ).json();
+    expect(updated.workouts[0].actualKm).toBe(3.22);
+    const html = await (
+      await request(`/app/plans/${plan.id}`, { headers: { Authorization: basic } })
+    ).text();
+    expect(html).toContain('mi (');
+    expect(html).toContain('name="distanceUnit"');
+    const csv = await (
+      await request(`/api/plans/${plan.id}/export.csv`, { headers: { Authorization: bearer } })
+    ).text();
+    expect(csv).toContain('"distance_miles","distance_km"');
+    expect(csv).toContain('"actual_miles","actual_km"');
+    const ics = await (
+      await request(`/api/plans/${plan.id}/calendar.ics`, { headers: { Authorization: bearer } })
+    ).text();
+    expect(ics).toContain('mi (');
+  });
+  it('creates plans from mile inputs and rejects an unsupported unit', async () => {
+    const values = new URLSearchParams({
+      ...Object.fromEntries(
+        Object.entries(config)
+          .filter(([key]) => key !== 'days')
+          .map(([key, value]) => [key, String(value)]),
+      ),
+      currentWeeklyKm: '10',
+      currentLongestKm: '4',
+      distanceUnit: 'mi',
+    });
+    for (const day of config.days) values.append('days', String(day));
+    const response = await formPost('/app/plans', values);
+    expect(response.status).toBe(303);
+    const plan: Plan = await (
+      await request(
+        (response.headers.get('Location') ?? '').replace('/app/plans/', '/api/plans/'),
+        {
+          headers: { Authorization: bearer },
+        },
+      )
+    ).json();
+    expect(plan.config.currentWeeklyKm).toBe(16.1);
+    expect(plan.config.currentLongestKm).toBe(6.4);
+    values.set('distanceUnit', 'furlongs');
+    expect((await formPost('/app/plans', values)).status).toBe(400);
   });
 });

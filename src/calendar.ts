@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ConflictError, getPlan } from './store';
 import type { Plan, Workout } from './types';
+import { distance, distanceText } from './units';
 
 const instant = z.string().datetime({ offset: true });
 const zone = z
@@ -429,8 +430,8 @@ export async function calendarBridgeState(db: D1Database) {
         start: new Date(start).toISOString(),
         end: new Date(start + duration).toISOString(),
         timeZone: settings.timeZone,
-        summary: `${workout.title} · ${workout.distanceKm} km`,
-        description: `OpenStride: ${plan.config.name}\n${workout.description}`,
+        summary: `${workout.title} · ${distance(workout.distanceKm)}`,
+        description: `OpenStride: ${plan.config.name}\n${distanceText(workout.description)}`,
         status: 'upsert',
       });
     }

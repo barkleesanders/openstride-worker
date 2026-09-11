@@ -39,6 +39,7 @@ import {
 } from './store';
 import * as strava from './strava';
 import type { Bindings, PlanConfig } from './types';
+import { inputKm } from './units';
 import { Dashboard, ErrorPage, Home, Layout, NewPlan, PlanPage } from './views';
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -47,7 +48,7 @@ app.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
-      scriptSrc: ['https://static.cloudflareinsights.com'],
+      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
       connectSrc: ["'self'", 'https://cloudflareinsights.com'],
       styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
@@ -227,8 +228,8 @@ function parsePlanForm(form: FormData) {
     goal: input.goal,
     startDate: input.startDate,
     weeks: Number(input.weeks),
-    currentWeeklyKm: Number(input.currentWeeklyKm),
-    currentLongestKm: Number(input.currentLongestKm),
+    currentWeeklyKm: inputKm(input.currentWeeklyKm, input.distanceUnit, 1),
+    currentLongestKm: inputKm(input.currentLongestKm, input.distanceUnit, 1),
     days: form.getAll('days').map(Number),
     longRunDay: Number(input.longRunDay),
     intensity: input.intensity,
@@ -473,12 +474,14 @@ app.put('/api/plans/:id/calendar', async (c) =>
 );
 app.post('/app/workouts/:id', async (c) => {
   const form = Object.fromEntries(await c.req.raw.formData());
-  const { planId, ...patch } = form;
+  const { planId, distanceUnit, ...patch } = form;
   const input: Record<string, unknown> = { ...patch };
   for (const key of ['actualKm', 'actualMinutes', 'effort']) {
     if (input[key] === '') input[key] = null;
     else if (input[key] !== undefined) input[key] = Number(input[key]);
   }
+  if (input.actualKm !== null && input.actualKm !== undefined)
+    input.actualKm = inputKm(input.actualKm, distanceUnit);
   const id = z.string().min(1).max(100).parse(planId);
   await updateWorkout(c.env.DB, id, c.req.param('id'), workoutPatchSchema.parse(input));
   return c.redirect(`/app/plans/${encodeURIComponent(id)}`, 303);
@@ -490,9 +493,10 @@ app.post('/app/plans/:id/ease', async (c) => {
 });
 app.post('/app/activities', async (c) => {
   const form = Object.fromEntries(await c.req.raw.formData());
+  const { distanceUnit, ...activity } = form;
   await logActivity(c.env, {
-    ...form,
-    distanceKm: Number(form.distanceKm),
+    ...activity,
+    distanceKm: inputKm(form.distanceKm, distanceUnit),
     durationMinutes: Number(form.durationMinutes),
   });
   return c.redirect('/app', 303);

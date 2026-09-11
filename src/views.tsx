@@ -1,12 +1,13 @@
 import type { Child } from 'hono/jsx';
 import type { Activity, Plan, PlanConfig } from './types';
+import { distance, distanceText, miles, paceRange } from './units';
 
 const goals: Record<string, string> = {
   base: 'Build a running habit',
-  '5k': '5K',
-  '10k': '10K',
-  half: 'Half marathon',
-  marathon: 'Marathon',
+  '5k': '3.1 miles (5K)',
+  '10k': '6.2 miles (10K)',
+  half: '13.1 miles (half marathon)',
+  marathon: '26.2 miles (marathon)',
 };
 const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -16,9 +17,20 @@ const dateLabel = (value: string) =>
     day: 'numeric',
     timeZone: 'UTC',
   });
-const distance = (value: number) => `${Math.round(value * 10) / 10} km`;
-const pace = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+
+function DistanceUnit() {
+  return (
+    <label>
+      Distance unit
+      <select name="distanceUnit">
+        <option value="mi" selected>
+          Miles (mi)
+        </option>
+        <option value="km">Kilometers (km)</option>
+      </select>
+    </label>
+  );
+}
 
 export function Layout({ title, children }: { title: string; children: Child }) {
   return (
@@ -29,6 +41,7 @@ export function Layout({ title, children }: { title: string; children: Child }) 
         <meta name="color-scheme" content="light" />
         <title>{title} · OpenStride</title>
         <link rel="stylesheet" href="/styles.css" />
+        <script src="/units.js" defer></script>
       </head>
       <body>
         <a class="skip" href="#main">
@@ -217,6 +230,7 @@ export function Dashboard({
               For runs outside your plan. This does not mark a planned session complete.
             </p>
             <form method="post" action="/app/activities">
+              <DistanceUnit />
               <div class="form-grid">
                 <label>
                   Run name
@@ -227,8 +241,11 @@ export function Dashboard({
                   <input type="date" name="date" value={today()} required />
                 </label>
                 <label>
-                  Distance (km)
-                  <input type="number" name="distanceKm" min={0} max={300} step="0.01" required />
+                  Distance (in selected unit)
+                  <input type="number" name="distanceKm" min={0} max={300} step="any" required />
+                  <span class="field-help">
+                    Miles first. Choose kilometers to enter a metric distance.
+                  </span>
                 </label>
                 <label>
                   Moving time (minutes)
@@ -402,6 +419,7 @@ export function NewPlan({
         )}
       </section>
       <form class="plan-form" method="post" action="/app/plans">
+        <DistanceUnit />
         {draftId && <input type="hidden" name="draftId" value={draftId} />}
         <fieldset>
           <legend>
@@ -453,27 +471,27 @@ export function NewPlan({
           </p>
           <div class="form-grid">
             <label>
-              Current weekly distance (km)
+              Current weekly distance (in selected unit)
               <input
                 type="number"
                 name="currentWeeklyKm"
                 min={0}
                 max={100}
-                step="0.1"
+                step="any"
                 required
-                value={config?.currentWeeklyKm ?? 10}
+                value={miles(config?.currentWeeklyKm ?? 10)}
               />
             </label>
             <label>
-              Longest comfortable recent run (km)
+              Longest comfortable recent run (in selected unit)
               <input
                 type="number"
                 name="currentLongestKm"
                 min={0}
                 max={100}
-                step="0.1"
+                step="any"
                 required
-                value={config?.currentLongestKm ?? 4}
+                value={miles(config?.currentLongestKm ?? 4)}
               />
             </label>
             <label>
@@ -491,7 +509,7 @@ export function NewPlan({
               </select>
             </label>
             <label>
-              Recent 5K time (minutes, optional)
+              Recent 3.1-mile (5K) time (minutes, optional)
               <input
                 type="number"
                 name="recent5kMinutes"
@@ -637,10 +655,7 @@ export function PlanPage({
           <span class="stat-label">Sessions completed</span>
         </div>
         <div>
-          <span class="stat-value">
-            {Math.round(totalKm)}
-            <small> km</small>
-          </span>
+          <span class="stat-value">{distance(totalKm)}</span>
           <span class="stat-label">Scheduled distance</span>
         </div>
         <div>
@@ -653,7 +668,7 @@ export function PlanPage({
           <h2>Before you begin</h2>
           <ul>
             {plan.warnings.map((warning) => (
-              <li>{warning}</li>
+              <li>{distanceText(warning)}</li>
             ))}
           </ul>
         </aside>
@@ -722,15 +737,17 @@ export function PlanPage({
                     </span>
                   </summary>
                   <div class="workout-body">
-                    <p>{workout.description}</p>
+                    <p>{distanceText(workout.description)}</p>
                     {workout.paceMinSeconds !== undefined &&
                       workout.paceMaxSeconds !== undefined && (
                         <p class="quiet">
-                          Estimated pace: {pace(workout.paceMinSeconds)}–
-                          {pace(workout.paceMaxSeconds)} /km. Effort and comfort come first.
+                          Estimated pace:{' '}
+                          {paceRange(workout.paceMinSeconds, workout.paceMaxSeconds)}. Effort and
+                          comfort come first.
                         </p>
                       )}
                     <form method="post" action={`/app/workouts/${workout.id}`}>
+                      <DistanceUnit />
                       <input type="hidden" name="planId" value={plan.id} />
                       <div class="form-grid compact">
                         <label>
@@ -752,14 +769,14 @@ export function PlanPage({
                           <input type="date" name="date" required value={workout.date} />
                         </label>
                         <label>
-                          Actual distance (km)
+                          Actual distance (in selected unit)
                           <input
                             type="number"
                             name="actualKm"
                             min={0}
                             max={300}
-                            step="0.01"
-                            value={workout.actualKm ?? ''}
+                            step="any"
+                            value={workout.actualKm === undefined ? '' : miles(workout.actualKm)}
                           />
                         </label>
                         <label>
