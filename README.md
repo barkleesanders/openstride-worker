@@ -1,18 +1,22 @@
 # OpenStride
 
 A personal running planner you can host on Cloudflare Workers and D1. Original,
-transparent training rules; no subscription, paid AI, or Runna account required.
+transparent training rules, optional Worker LLM recommendations, and calendar sync.
+Manual planning does not require AI or a Runna account.
 MIT licensed. Not affiliated with Runna or Strava.
 
 ## Features
 
 - Build 4–24 week plans for a running habit, 5K, 10K, half marathon, or marathon preparation.
 - Choose running days, a long-run day, your recent mileage, and training approach.
+- Get AI recommendations from recent running and calendar availability, then review before saving.
+- Check Google Calendar availability and opt individual plans into scheduled event sync.
 - Track completion, actual distance/time, effort, and notes. Move sessions to another date.
 - Explicitly reduce future training by 20%; completed sessions stay intact.
 - Download iCalendar and CSV files, and access your plans through a JSON API or MCP.
 - Optionally import recent runs from your own Strava account.
-- Server-rendered, responsive interface with no client JavaScript or external assets.
+- Server-rendered interface with no authored client JavaScript. Cloudflare may inject
+  its analytics beacon according to the zone configuration.
 
 This is a **single-person installation**. Cloudflare Access can restrict browser
 login to one email address using emailed one-time codes. API and MCP clients use
@@ -42,11 +46,12 @@ npm run build
 Tests cover the engine, exports, and integration behavior. Strava API tests use
 fixtures; connecting a real account is an optional separate verification.
 
-## Deploy on the free tier
+## Deploy
 
-Use a Cloudflare account on **Workers Free**. The app needs one Worker and one D1
-database. It does not require a domain purchase, R2, Workers AI, a paid cron service,
-or a paid Workers subscription.
+The app needs one Worker and one D1 database. Manual planning can run within
+Workers Free limits. The checked-in configuration enables Workers AI, which adds
+model usage subject to your account's allowances and pricing. Remove the `ai`
+binding to disable recommendations. Calendar sync uses a separate online host.
 
 ```sh
 npx wrangler login
@@ -127,6 +132,98 @@ an ease request with the same start date is idempotent. A different start date c
 reduce overlapping future sessions again. Imported activities do not automatically
 complete workouts.
 
+## Worker AI recommendations
+
+The checked-in configuration binds Workers AI as `AI` with remote inference.
+The model is `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Remote inference, including
+local development with that binding, consumes account usage. Review
+[Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+before enabling it; no zero-cost guarantee is implied.
+
+Open **New plan**, review the starting distances, choose your constraints, and add
+optional notes. **Get AI recommendations** returns a preview without saving a plan
+or writing calendar events. The model receives your configuration and notes,
+a summary of imported runs from the latest 28 calendar days, and daily calendar
+availability totals. Activity names, IDs, GPS routes, appointment titles, and
+appointment descriptions are excluded from its prompt. Notes are sent as entered.
+
+Recommendations preserve your goal, start date, plan length, long-run day, and
+provided 5K result. Recommended days must fit your selected days; training volume
+and intensity cannot exceed your submitted baseline. The training engine builds
+workouts after you review and save. The browser retains a model rationale only
+when the saved configuration matches its server-side draft. Drafts expire after
+24 hours. Manual settings remain available if AI fails or is disabled.
+
+The Worker allows **20 attempts per installation per UTC day**, including failures,
+with **1,200 output tokens** and a **25-second application timeout** per attempt.
+The timeout is not a billing guarantee. Invalid output is rejected. Check the
+returned recommendation and rationale when verifying model behavior.
+
+## Google Calendar connection and sync
+
+The bridge uses an existing authenticated `gog` installation on an online host.
+Google credentials remain there; the browser has no Google token entry form.
+The account needs Calendar read access and write access to a chosen destination
+if you enable plan sync. Confirm stored authorization with `gog auth doctor`.
+
+Create a private `~/.config/openstride/calendar-bridge.json`:
+
+```json
+{
+  "url": "https://YOUR-HOST",
+  "token": "YOUR_APP_TOKEN",
+  "account": "YOUR_GOOGLE_ACCOUNT",
+  "gog": "/opt/homebrew/bin/gog"
+}
+```
+
+Use your actual installation token/account, set file permissions to `600`, and
+never commit it. The URL must be an HTTPS origin without a path or credentials.
+Run the first import on the host where `gog` is authorized:
+
+```sh
+node scripts/calendar-bridge.mjs ~/.config/openstride/calendar-bridge.json
+```
+
+In **Calendar**, select Personal or the other calendars whose busy time should
+inform planning. Initial setup is read-only: no destination is selected and no
+plan is opted into event sync. A newly discovered primary calendar is the default
+availability calendar. Run another sync after selecting calendars to refresh
+their busy intervals. Choose a writable destination and time zone/running window,
+then explicitly **Enable calendar sync** inside each desired plan. Saving calendar
+settings alone does not enable plan sync.
+
+The bridge imports a bounded **180-day window** (one day back and 179 days ahead),
+with at most **2,000 busy intervals** and **512 KiB per upload**. It uploads calendar
+names/IDs/time zones, busy intervals, and sync receipts. Existing appointment
+titles, descriptions, attendees, and locations are not uploaded. Stale or
+incomplete availability is not presented as connected. Changing read calendars
+requires a new snapshot before their availability is used.
+
+Timed runs are placed within free intervals in your daily running window; sessions
+without enough room are flagged as conflicts. Stable event IDs and private
+ownership markers restrict changes to OpenStride events. Receipt fingerprints
+skip unchanged writes and let failed changes retry. Concurrent or older snapshot
+writes are rejected instead of silently overwriting newer state. Past and completed
+sessions are preserved when sync is disabled. Google Calendar edits do not update
+workout records; edit the plan in OpenStride. This is not general two-way editing.
+
+### Optional five-minute host schedule
+
+`scripts/calendar-sync.zsh` acquires a local lock, loads the existing private
+`~/.config/gogcli/agent-env.zsh` environment, and runs the bridge. It expects
+`calendar-sync.zsh` and `calendar-bridge.mjs` in `~/tools/openstride/` and Node at
+`/opt/homebrew/bin/node`. Adapt these paths for another host.
+
+`scripts/com.barkleesanders.openstride-calendar.plist.template` runs every 300
+seconds and at load. Replace every `__HOME__` with the host's absolute home path
+before installing it in `~/Library/LaunchAgents/`. The repository provides the
+template; it does not install or activate a LaunchAgent. Installation and bootstrap
+belong to the deployment step, after checking the wrapper's prerequisites.
+Logs use `~/tools/openstride/calendar-sync.log` and `calendar-sync-error.log`.
+The host must remain online; stopping the agent pauses sync. If a stale lock is
+reported, verify the earlier process has stopped before removing the lock.
+
 ## Optional Strava import
 
 Create your own API application at [Strava API settings](https://www.strava.com/settings/api).
@@ -182,9 +279,10 @@ recording, and push notifications are also outside this web app.
 
 ## Data and maintenance
 
-Plans and activities live in your D1 database. Only optional Strava operations make
-third-party API calls. The app has no advertising or analytics scripts; Cloudflare
-still processes requests and may retain operational logs according to your settings.
+Plans, activities, calendar snapshots, sync receipts, and AI drafts live in D1.
+Enabled recommendations call Workers AI, Strava adapters call Strava, and the host
+calendar bridge calls Google Calendar. Cloudflare processes requests and may inject
+its analytics beacon or retain operational logs according to your settings.
 Do not share your installation token with an untrusted MCP client.
 
 The dashboard displays the 10 most recent plans and 100 most recent activities.
@@ -205,20 +303,26 @@ then deploy. Deleting a Worker does not automatically delete its D1 database.
 
 ## JSON API
 
-Send `Authorization: Bearer YOUR_APP_TOKEN`. Browser exports also accept the same
-Basic login as the dashboard. JSON requests use `Content-Type: application/json`.
+Send `Authorization: Bearer YOUR_APP_TOKEN`. Browser exports use the dashboard's
+configured Access or Basic login. JSON requests use `Content-Type: application/json`.
 Browser mutations require a matching `Origin`; cross-origin requests are rejected.
 
 | Method | Path | Input / result |
 | --- | --- | --- |
 | GET | `/api/plans` | Latest ten plans |
 | POST | `/api/plans` | Plan configuration; returns saved plan |
+| POST | `/api/plans/propose` | `{ "config": { ... }, "notes": "..." }`; recommendation and draft ID, no saved plan |
+| GET / PUT | `/api/calendar` | Snapshot/settings / save read calendars, destination, time zone, and window |
+| GET | `/api/calendar/bridge` | Desired event changes for the host bridge |
+| POST | `/api/calendar/import` | Calendar snapshot and event receipts from the bridge |
+| PUT | `/api/plans/:id/calendar` | `{ "enabled": true }` or `{ "enabled": false }` |
 | GET | `/api/plans/:id` | Complete plan |
 | PATCH | `/api/plans/:planId/workouts/:id` | Status, date, actualKm, actualMinutes, effort, notes |
 | POST | `/api/plans/:id/ease` | `{ "startDate": "2026-10-01" }` |
 | GET | `/api/plans/:id/calendar.ics` | All-day calendar export |
 | GET | `/api/plans/:id/export.csv` | Spreadsheet export |
 | GET / POST | `/api/activities` | List / record an activity |
+| POST | `/api/activities/import` | `{ "activities": [...] }`; up to 100 Strava run records |
 | GET | `/api/integrations` | Strava configuration and connection status |
 | POST | `/api/strava/sync` | Import bounded recent runs |
 | DELETE | `/api/strava` | Forget local Strava connection |
@@ -255,7 +359,7 @@ provided; export data before performing deliberate database maintenance.
 ## MCP
 
 Point a client that supports custom bearer headers at
-`https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/mcp` using the same installation token.
+`https://YOUR-HOST/mcp` using the same installation token.
 This is a stateless HTTP JSON-RPC endpoint; POST returns JSON, GET streaming is not
 implemented. It negotiates MCP protocol `2025-03-26` and requires no session ID.
 It does not implement OAuth discovery, so clients that require OAuth rather than
@@ -263,7 +367,11 @@ static bearer credentials cannot connect directly.
 
 Tools: `list_plans`, `get_plan`, `create_plan`, `update_workout`, `ease_plan`,
 `list_activities`, `log_activity`, `export_calendar`, `export_csv`, `strava_status`,
-`sync_strava`, and `disconnect_strava`. `tools/list` returns each input schema.
+`sync_strava`, `disconnect_strava`, `import_activities`, `propose_plan`,
+`calendar_status`, `configure_calendar`, and `sync_plan_calendar`. `tools/list`
+returns each input schema. `propose_plan` returns a recommendation without saving;
+after review, pass its configuration to `create_plan`. Calendar sync is opt-in via
+`sync_plan_calendar`, after choosing a destination with `configure_calendar`.
 Connect Strava in your browser before invoking its import tools.
 
 Example initialization body:
