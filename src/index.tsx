@@ -659,6 +659,7 @@ app.all('/mcp', (c) => {
   c.header('Allow', 'POST');
   return c.json({ error: 'This stateless MCP endpoint accepts POST requests.' }, 405);
 });
+app.get('/security.txt', (c) => c.redirect('/.well-known/security.txt', 301));
 app.notFound((c) => c.json({ error: 'Not found.' }, 404));
 app.onError((error, c) => {
   console.warn(
