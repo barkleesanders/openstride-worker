@@ -30,6 +30,7 @@ export type Workout = {
   notes?: string;
 };
 export type Plan = {
+  ai?: { model: string; rationale: string; generatedAt: string };
   id: string;
   createdAt: string;
   config: PlanConfig;
@@ -46,6 +47,7 @@ export type Activity = {
   durationMinutes: number;
 };
 export type Bindings = {
+  AI?: import('./ai-planner').PlannerAI;
   DB: D1Database;
   ASSETS: Fetcher;
   APP_TOKEN: string;

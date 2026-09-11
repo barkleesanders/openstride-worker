@@ -1,5 +1,5 @@
 import type { Child } from 'hono/jsx';
-import type { Activity, Plan } from './types';
+import type { Activity, Plan, PlanConfig } from './types';
 
 const goals: Record<string, string> = {
   base: 'Build a running habit',
@@ -44,6 +44,7 @@ export function Layout({ title, children }: { title: string; children: Child }) 
           <nav aria-label="Main navigation">
             <a href="/">Home</a>
             <a href="/app">My running</a>
+            <a href="/app/calendar">Calendar</a>
             <a class="nav-create" href="/app/new">
               New plan <span aria-hidden="true">↗</span>
             </a>
@@ -52,7 +53,7 @@ export function Layout({ title, children }: { title: string; children: Child }) 
         <main id="main">{children}</main>
         <footer class="site-footer">
           <span>OpenStride / Your pace. Your plan.</span>
-          <span>Open source. No ads. No tracking.</span>
+          <span>Open source.</span>
         </footer>
       </body>
     </html>
@@ -116,12 +117,13 @@ export function Home({ accessLogin = false }: { accessLogin?: boolean }) {
       <section class="note-panel">
         <h2>Structure to support you.</h2>
         <p>
-          This is a transparent, rules-based planner, not a personal coach or medical service. It
-          cannot assess injury, health, or race readiness. Start with your recent training, keep
-          easy runs comfortable, and stop if something hurts.
+          AI can recommend a starting point from your recent running and availability. Training
+          rules bound the resulting schedule. This planner cannot assess injury, health, or race
+          readiness. Start with your recent training, keep easy runs comfortable, and stop if
+          something hurts.
         </p>
         <p class="quiet">
-          No subscription or paid AI is required. Apple Health and Android Health Connect need an
+          Manual planning is also available. Apple Health and Android Health Connect need an
           on-device companion; this web app does not connect to them directly.
         </p>
       </section>
@@ -333,7 +335,27 @@ export function Dashboard({
   );
 }
 
-export function NewPlan({ error }: { error?: string }) {
+export function NewPlan({
+  error,
+  config,
+  aiEnabled = false,
+  activityCount = 0,
+  calendarConnected = false,
+  calendarSyncedAt,
+  rationale,
+  draftId,
+  notes = '',
+}: {
+  error?: string;
+  config?: PlanConfig;
+  aiEnabled?: boolean;
+  activityCount?: number;
+  calendarConnected?: boolean;
+  calendarSyncedAt?: string;
+  rationale?: string;
+  draftId?: string;
+  notes?: string;
+}) {
   return (
     <>
       <section class="page-heading">
@@ -348,7 +370,39 @@ export function NewPlan({ error }: { error?: string }) {
           {error}
         </p>
       )}
+      <section class="note-panel" aria-label="Planning context">
+        <h2>
+          {rationale
+            ? 'Your recommendation is ready to review.'
+            : 'Start with what is already connected.'}
+        </h2>
+        <p>
+          {activityCount > 0
+            ? `${activityCount} recent running activities are available to inform your plan. Check the starting distances below against how you feel today.`
+            : 'No recent running activities are available yet. Enter your current training below.'}
+        </p>
+        <p>
+          {calendarConnected
+            ? 'Calendar availability is connected. Your selected calendars help find room for runs.'
+            : 'Connect your calendar to plan around your existing commitments.'}
+          {calendarSyncedAt && <> Last availability sync: {calendarSyncedAt}.</>}
+        </p>
+        <a class="text-link" href="/app/calendar">
+          Manage calendar connection →
+        </a>
+        {rationale && (
+          <div role="status">
+            <h3>Why these recommendations</h3>
+            <p>{rationale}</p>
+            <p class="quiet">
+              The fields below contain the recommendation. Review or edit them, then save your plan.
+              Nothing has been saved yet.
+            </p>
+          </div>
+        )}
+      </section>
       <form class="plan-form" method="post" action="/app/plans">
+        {draftId && <input type="hidden" name="draftId" value={draftId} />}
         <fieldset>
           <legend>
             <span class="step">01</span> A direction
@@ -356,25 +410,37 @@ export function NewPlan({ error }: { error?: string }) {
           <div class="form-grid">
             <label>
               Plan name
-              <input name="name" required maxlength={80} value="My next chapter" />
+              <input
+                name="name"
+                required
+                maxlength={80}
+                value={config?.name ?? 'My next chapter'}
+              />
             </label>
             <label>
               Goal
               <select name="goal">
-                <option value="base">Build a running habit</option>
-                <option value="5k">5K</option>
-                <option value="10k">10K</option>
-                <option value="half">Half marathon</option>
-                <option value="marathon">Marathon</option>
+                {Object.entries(goals).map(([value, label]) => (
+                  <option value={value} selected={value === (config?.goal ?? 'base')}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
               Start date
-              <input type="date" name="startDate" required value={today()} />
+              <input type="date" name="startDate" required value={config?.startDate ?? today()} />
             </label>
             <label>
               Plan length, in weeks
-              <input type="number" name="weeks" min={4} max={24} required value={12} />
+              <input
+                type="number"
+                name="weeks"
+                min={4}
+                max={24}
+                required
+                value={config?.weeks ?? 12}
+              />
             </label>
           </div>
         </fieldset>
@@ -395,7 +461,7 @@ export function NewPlan({ error }: { error?: string }) {
                 max={100}
                 step="0.1"
                 required
-                value={10}
+                value={config?.currentWeeklyKm ?? 10}
               />
             </label>
             <label>
@@ -407,15 +473,21 @@ export function NewPlan({ error }: { error?: string }) {
                 max={100}
                 step="0.1"
                 required
-                value={4}
+                value={config?.currentLongestKm ?? 4}
               />
             </label>
             <label>
               Training approach
               <select name="intensity">
-                <option value="gentle">Gentle — focus on easy running</option>
-                <option value="balanced">Balanced — add some variety</option>
-                <option value="challenging">Challenging — more demanding sessions</option>
+                <option value="gentle" selected={(config?.intensity ?? 'gentle') === 'gentle'}>
+                  Gentle — focus on easy running
+                </option>
+                <option value="balanced" selected={config?.intensity === 'balanced'}>
+                  Balanced — add some variety
+                </option>
+                <option value="challenging" selected={config?.intensity === 'challenging'}>
+                  Challenging — more demanding sessions
+                </option>
               </select>
             </label>
             <label>
@@ -427,6 +499,7 @@ export function NewPlan({ error }: { error?: string }) {
                 max={90}
                 step="0.1"
                 placeholder="For example, 30"
+                value={config?.recent5kMinutes ?? ''}
               />
               <span class="field-help">
                 An actual recent result can guide pace estimates. Leave blank if unsure.
@@ -446,7 +519,7 @@ export function NewPlan({ error }: { error?: string }) {
                   type="checkbox"
                   name="days"
                   value={i + 1}
-                  checked={[2, 4, 7].includes(i + 1)}
+                  checked={(config?.days ?? [2, 4, 7]).includes(i + 1)}
                 />
                 <span>{day}</span>
               </label>
@@ -456,28 +529,67 @@ export function NewPlan({ error }: { error?: string }) {
             Long-run day
             <select name="longRunDay">
               {dayNames.map((day, i) => (
-                <option value={i + 1} selected={i === 6}>
+                <option value={i + 1} selected={i + 1 === (config?.longRunDay ?? 7)}>
                   {day}
                 </option>
               ))}
             </select>
           </label>
         </fieldset>
+        <fieldset>
+          <legend>
+            <span class="step">04</span> What else should your plan account for?
+          </legend>
+          <label>
+            Preferences and constraints (optional)
+            <textarea
+              name="notes"
+              maxlength={2000}
+              rows={4}
+              placeholder="For example: keep weekday runs short, or build back gradually after time off."
+            >
+              {notes}
+            </textarea>
+          </label>
+          <p class="field-help">
+            AI uses these notes with your training and calendar availability to recommend settings.
+            Review the recommendation before saving.
+          </p>
+        </fieldset>
         <div class="form-footer">
           <p class="quiet">
-            Your plan uses fixed training rules. Review it before starting and adjust to how you
-            feel. A generated plan does not establish race readiness.
+            {aiEnabled
+              ? 'Ask AI for recommended settings, or save the settings you chose yourself.'
+              : 'AI recommendations are not enabled on this installation. You can save a plan using your own settings.'}{' '}
+            Training rules bound the schedule in both cases. Review it before starting and adjust to
+            how you feel.
           </p>
-          <button class="button" type="submit">
-            Build my plan <span aria-hidden="true">↗</span>
-          </button>
+          <div class="actions">
+            {aiEnabled && (
+              <button class="button" type="submit" formaction="/app/plans/propose">
+                {rationale ? 'Revise with AI' : 'Get AI recommendations'}{' '}
+                <span aria-hidden="true">↗</span>
+              </button>
+            )}
+            <button class="button secondary" type="submit" formaction="/app/plans">
+              {rationale ? 'Save this plan' : 'Save with these settings'}
+            </button>
+          </div>
         </div>
       </form>
     </>
   );
 }
 
-export function PlanPage({ plan, message }: { plan: Plan; message?: string }) {
+export function PlanPage({
+  plan,
+  message,
+  calendarSync,
+}: {
+  plan: Plan;
+  message?: string;
+  calendarSync?: { enabled: boolean; syncedAt?: string; pending?: number; conflicts?: number };
+}) {
   const complete = plan.workouts.filter((workout) => workout.status === 'completed').length;
   const totalKm = plan.workouts.reduce((sum, workout) => sum + workout.distanceKm, 0);
   const weeks = [...new Set(plan.workouts.map((workout) => workout.week))].sort((a, b) => a - b);
@@ -505,6 +617,16 @@ export function PlanPage({ plan, message }: { plan: Plan; message?: string }) {
         <p class="notice" role="status">
           {message}
         </p>
+      )}
+      {plan.ai && (
+        <section class="note-panel" aria-label="AI recommendation">
+          <h2>The thinking behind your plan</h2>
+          <p>{plan.ai.rationale}</p>
+          <p class="quiet">
+            AI recommendation created {plan.ai.generatedAt}. Training rules bound the final
+            schedule.
+          </p>
+        </section>
       )}
       <div class="stats">
         <div>
@@ -536,6 +658,39 @@ export function PlanPage({ plan, message }: { plan: Plan; message?: string }) {
           </ul>
         </aside>
       )}
+      <section class="note-panel" aria-label="Calendar sync">
+        <h2>Make time for this plan.</h2>
+        <p>
+          {calendarSync?.enabled
+            ? 'Calendar sync is enabled for this plan.'
+            : 'Calendar sync is off for this plan. Choose your calendars, then enable sync to schedule these runs.'}
+        </p>
+        {calendarSync?.syncedAt && <p class="quiet">Last sync: {calendarSync.syncedAt}</p>}
+        {Boolean(calendarSync?.pending) && (
+          <p>{calendarSync?.pending} calendar changes are waiting to sync.</p>
+        )}
+        {Boolean(calendarSync?.conflicts) && (
+          <p class="notice">
+            {calendarSync?.conflicts} sessions need more room in your calendar. Review your
+            availability or move the session.
+          </p>
+        )}
+        <div class="actions">
+          <a class="text-link" href="/app/calendar">
+            Calendar settings →
+          </a>
+          <form method="post" action={`/app/plans/${plan.id}/calendar`}>
+            <button
+              class="button secondary"
+              type="submit"
+              name="action"
+              value={calendarSync?.enabled ? 'disable' : 'enable'}
+            >
+              {calendarSync?.enabled ? 'Turn off calendar sync' : 'Enable calendar sync'}
+            </button>
+          </form>
+        </div>
+      </section>
       <section class="schedule section">
         <div class="section-title">
           <h2>The weeks ahead</h2>

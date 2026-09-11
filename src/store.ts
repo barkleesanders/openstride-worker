@@ -38,6 +38,7 @@ const workoutSchema = z.object({
   notes: z.string().optional(),
 });
 const storedPlanSchema = z.object({
+  ai: z.object({ model: z.string(), rationale: z.string(), generatedAt: z.string() }).optional(),
   id: z.string(),
   createdAt: z.string(),
   config: planConfigSchema,

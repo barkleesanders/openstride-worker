@@ -7,6 +7,18 @@ import { HTTPException } from 'hono/http-exception';
 import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
 import { isAccessConfigured, verifyAccess } from './access';
+import { PlannerError, proposePlan, summarizeActivities } from './ai-planner';
+import {
+  calendarBridgeState,
+  calendarContext,
+  calendarImportSchema,
+  calendarState,
+  importCalendar,
+  planCalendarStatus,
+  saveCalendarSettings,
+  setPlanCalendar,
+} from './calendar';
+import { CalendarSettings as CalendarSettingsPage } from './calendar-views';
 import { generatePlan, planConfigSchema, toCalendar, toCsv } from './engine';
 import { handleMcp, type ToolName, toolSchemas } from './mcp';
 import {
@@ -26,7 +38,7 @@ import {
   workoutPatchSchema,
 } from './store';
 import * as strava from './strava';
-import type { Bindings } from './types';
+import type { Bindings, PlanConfig } from './types';
 import { Dashboard, ErrorPage, Home, Layout, NewPlan, PlanPage } from './views';
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -50,12 +62,18 @@ app.use(
 app.use(
   '*',
   bodyLimit({
-    maxSize: 32768,
+    maxSize: 524288,
     onError: (c) => c.json({ error: 'Request body exceeds 32 KB.' }, 413),
   }),
 );
 app.use('*', async (c, next) => {
   const path = c.req.path;
+  if (
+    path !== '/api/calendar/import' &&
+    !['GET', 'HEAD'].includes(c.req.method) &&
+    new TextEncoder().encode(await c.req.raw.clone().text()).length > 32768
+  )
+    return c.json({ error: 'Request body exceeds 32 KB.' }, 413);
   if (
     !(
       path === '/app' ||
@@ -202,43 +220,257 @@ app.get('/app', async (c) => {
     </Layout>,
   );
 });
-app.get('/app/new', (c) =>
-  c.html(
-    <Layout title="New plan">
-      <NewPlan />
-    </Layout>,
-  ),
-);
-app.get('/app/plans/:id', async (c) =>
-  c.html(
-    <Layout title="Training plan">
-      <PlanPage plan={await getPlan(c.env.DB, c.req.param('id'))} />
-    </Layout>,
-  ),
-);
-app.post('/app/plans', async (c) => {
-  const form = await c.req.raw.formData();
+function parsePlanForm(form: FormData) {
   const input = Object.fromEntries(form);
-  const config = {
-    ...input,
-    days: form.getAll('days').map(Number),
+  return planConfigSchema.parse({
+    name: input.name,
+    goal: input.goal,
+    startDate: input.startDate,
     weeks: Number(input.weeks),
     currentWeeklyKm: Number(input.currentWeeklyKm),
     currentLongestKm: Number(input.currentLongestKm),
+    days: form.getAll('days').map(Number),
     longRunDay: Number(input.longRunDay),
+    intensity: input.intensity,
     recent5kMinutes: input.recent5kMinutes ? Number(input.recent5kMinutes) : undefined,
+  });
+}
+async function newPlanContext(env: Bindings) {
+  const [activities, calendar] = await Promise.all([listActivities(env.DB), calendarState(env.DB)]);
+  const summary = summarizeActivities(activities);
+  const config: PlanConfig = {
+    name: 'My next chapter',
+    goal: 'base',
+    startDate: new Intl.DateTimeFormat('en-CA', { timeZone: calendar.settings.timeZone }).format(
+      new Date(),
+    ),
+    weeks: 12,
+    currentWeeklyKm: Math.min(100, summary.averageWeeklyKm),
+    currentLongestKm: Math.min(100, summary.longestKm, summary.averageWeeklyKm),
+    days: [2, 4, 7],
+    longRunDay: 7,
+    intensity: 'gentle',
   };
-  const parsed = planConfigSchema.safeParse(config);
-  if (!parsed.success)
+  return {
+    activities,
+    calendar,
+    config,
+    aiEnabled: !!env.AI,
+    activityCount: summary.runCount,
+    calendarConnected: calendarContext(
+      calendar.settings,
+      calendar.snapshot,
+      config.startDate,
+      config.weeks,
+    ).connected,
+    calendarSyncedAt: calendar.snapshot?.syncedAt,
+  };
+}
+async function recommend(env: Bindings, input: unknown) {
+  const data = z
+    .object({ config: planConfigSchema, notes: z.string().max(2000).default('') })
+    .strict()
+    .parse(input);
+  if (!env.AI)
+    throw new HTTPException(503, { message: 'AI planning is not enabled on this installation.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const permit = await env.DB.prepare(
+    "INSERT INTO connection(id,value,updated_at) VALUES(?, '1', ?) ON CONFLICT(id) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT),updated_at=excluded.updated_at WHERE CAST(value AS INTEGER)<20 RETURNING value",
+  )
+    .bind(`ai_usage:${today}`, new Date().toISOString())
+    .first();
+  if (!permit)
+    throw new HTTPException(429, {
+      message:
+        'The daily limit of 20 AI suggestions has been reached. Try tomorrow or build using the reviewed settings.',
+    });
+  const { activities, calendar } = await newPlanContext(env);
+  const started = Date.now();
+  try {
+    const proposal = await proposePlan(env.AI, {
+      baseline: data.config,
+      notes: data.notes,
+      activities,
+      calendar: calendarContext(
+        calendar.settings,
+        calendar.snapshot,
+        data.config.startDate,
+        data.config.weeks,
+      ),
+    });
+    const draftId = crypto.randomUUID(),
+      generatedAt = new Date().toISOString();
+    await env.DB.prepare('INSERT INTO connection(id,value,updated_at) VALUES(?,?,?)')
+      .bind(`ai_draft:${draftId}`, JSON.stringify({ ...proposal, generatedAt }), generatedAt)
+      .run();
+    await env.DB.prepare("DELETE FROM connection WHERE id LIKE 'ai_draft:%' AND updated_at < ?")
+      .bind(new Date(Date.now() - 86400000).toISOString())
+      .run();
+    console.info(
+      JSON.stringify({
+        event: 'ai_plan_proposed',
+        model: proposal.model,
+        durationMs: Date.now() - started,
+        calendarConnected: !!calendar.snapshot,
+      }),
+    );
+    return { ...proposal, draftId };
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: 'ai_plan_failed',
+        reason: error instanceof PlannerError ? error.reason : 'internal',
+        durationMs: Date.now() - started,
+      }),
+    );
+    throw error;
+  }
+}
+app.get('/app/new', async (c) =>
+  c.html(
+    <Layout title="New plan">
+      <NewPlan {...(await newPlanContext(c.env))} />
+    </Layout>,
+  ),
+);
+app.post('/app/plans/propose', async (c) => {
+  const form = await c.req.raw.formData();
+  const context = await newPlanContext(c.env);
+  let config = context.config;
+  const notes = String(form.get('notes') ?? '').slice(0, 2000);
+  try {
+    config = parsePlanForm(form);
+    const result = await recommend(c.env, { config, notes });
+    return c.html(
+      <Layout title="Review your AI suggestion">
+        <NewPlan
+          {...context}
+          config={result.config}
+          notes={notes}
+          rationale={result.rationale}
+          draftId={result.draftId}
+        />
+      </Layout>,
+    );
+  } catch (error) {
+    if (
+      !(
+        error instanceof z.ZodError ||
+        error instanceof PlannerError ||
+        error instanceof HTTPException
+      )
+    )
+      throw error;
     return c.html(
       <Layout title="Review your plan">
-        <NewPlan error={parsed.error.issues.map((i) => i.message).join(' ')} />
+        <NewPlan
+          {...context}
+          config={config}
+          notes={notes}
+          error={
+            error instanceof z.ZodError
+              ? error.issues.map((i) => i.message).join(' ')
+              : error.message
+          }
+        />
       </Layout>,
-      400,
+      error instanceof HTTPException ? error.status : error instanceof PlannerError ? 503 : 400,
     );
-  const plan = await create(c.env, parsed.data);
+  }
+});
+app.post('/api/plans/propose', async (c) =>
+  c.json(await recommend(c.env, await jsonBody(c.req.raw))),
+);
+app.get('/app/plans/:id', async (c) => {
+  const plan = await getPlan(c.env.DB, c.req.param('id'));
+  return c.html(
+    <Layout title="Training plan">
+      <PlanPage plan={plan} calendarSync={await planCalendarStatus(c.env.DB, plan)} />
+    </Layout>,
+  );
+});
+app.post('/app/plans', async (c) => {
+  const form = await c.req.raw.formData();
+  const config = parsePlanForm(form);
+  const plan = generatePlan(config, crypto.randomUUID());
+  const draftId = z
+    .string()
+    .uuid()
+    .optional()
+    .parse(form.get('draftId') || undefined);
+  if (draftId) {
+    const row = await c.env.DB.prepare('SELECT value FROM connection WHERE id=? AND updated_at>=?')
+      .bind(`ai_draft:${draftId}`, new Date(Date.now() - 86400000).toISOString())
+      .first<{ value: string }>();
+    if (row) {
+      const draft = z
+        .object({
+          config: planConfigSchema,
+          model: z.string(),
+          rationale: z.string(),
+          generatedAt: z.string(),
+        })
+        .parse(JSON.parse(row.value));
+      if (JSON.stringify(draft.config) === JSON.stringify(config))
+        plan.ai = {
+          model: draft.model,
+          rationale: draft.rationale,
+          generatedAt: draft.generatedAt,
+        };
+    }
+  }
+  await savePlan(c.env.DB, plan);
   return c.redirect(`/app/plans/${plan.id}`, 303);
 });
+app.get('/app/calendar', async (c) => {
+  const { settings, snapshot } = await calendarState(c.env.DB);
+  return c.html(
+    <Layout title="Calendar settings">
+      <CalendarSettingsPage
+        settings={settings}
+        calendars={snapshot?.calendars ?? []}
+        syncedAt={snapshot?.syncedAt}
+      />
+    </Layout>,
+  );
+});
+app.post('/app/calendar', async (c) => {
+  const form = await c.req.raw.formData();
+  await saveCalendarSettings(c.env.DB, {
+    readCalendarIds: form.getAll('readCalendarIds'),
+    writeCalendarId: form.get('writeCalendarId') || null,
+    timeZone: form.get('timeZone'),
+    windowStart: form.get('windowStart'),
+    windowEnd: form.get('windowEnd'),
+  });
+  return c.redirect('/app/calendar', 303);
+});
+app.post('/app/plans/:id/calendar', async (c) => {
+  const form = await c.req.raw.formData();
+  const action = z.enum(['enable', 'disable']).parse(form.get('action'));
+  await setPlanCalendar(c.env.DB, c.req.param('id'), action === 'enable');
+  return c.redirect(`/app/plans/${encodeURIComponent(c.req.param('id'))}`, 303);
+});
+app.get('/api/calendar', async (c) => c.json(await calendarState(c.env.DB)));
+app.put('/api/calendar', async (c) =>
+  c.json(await saveCalendarSettings(c.env.DB, await jsonBody(c.req.raw))),
+);
+app.get('/api/calendar/bridge', async (c) => c.json(await calendarBridgeState(c.env.DB)));
+app.post('/api/calendar/import', async (c) =>
+  c.json(await importCalendar(c.env.DB, calendarImportSchema.parse(await jsonBody(c.req.raw)))),
+);
+app.put('/api/plans/:id/calendar', async (c) =>
+  c.json(
+    await setPlanCalendar(
+      c.env.DB,
+      c.req.param('id'),
+      z
+        .object({ enabled: z.boolean() })
+        .strict()
+        .parse(await jsonBody(c.req.raw)).enabled,
+    ),
+  ),
+);
 app.post('/app/workouts/:id', async (c) => {
   const form = Object.fromEntries(await c.req.raw.formData());
   const { planId, ...patch } = form;
@@ -371,6 +603,16 @@ app.get('/app/strava/callback', async (c) => {
 });
 async function callTool(env: Bindings, name: ToolName, raw: unknown): Promise<unknown> {
   switch (name) {
+    case 'propose_plan':
+      return recommend(env, raw);
+    case 'calendar_status':
+      return calendarState(env.DB);
+    case 'configure_calendar':
+      return saveCalendarSettings(env.DB, raw);
+    case 'sync_plan_calendar': {
+      const input = toolSchemas.sync_plan_calendar.parse(raw);
+      return setPlanCalendar(env.DB, input.planId, input.enabled);
+    }
     case 'list_plans':
       return listPlans(env.DB);
     case 'get_plan':
@@ -435,16 +677,19 @@ app.onError((error, c) => {
   if (error instanceof HTTPException && error.getResponse().headers.has('WWW-Authenticate'))
     return error.getResponse();
   const status =
-    error instanceof HTTPException
-      ? error.status
-      : error instanceof z.ZodError
-        ? 400
-        : error instanceof MissingError
-          ? 404
-          : error instanceof ConflictError
-            ? 409
-            : 500;
+    error instanceof PlannerError
+      ? 503
+      : error instanceof HTTPException
+        ? error.status
+        : error instanceof z.ZodError
+          ? 400
+          : error instanceof MissingError
+            ? 404
+            : error instanceof ConflictError
+              ? 409
+              : 500;
   const message =
+    error instanceof PlannerError ||
     error instanceof HTTPException ||
     error instanceof MissingError ||
     error instanceof ConflictError

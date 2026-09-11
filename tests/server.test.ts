@@ -403,3 +403,72 @@ describe('MCP over HTTP', () => {
     expect((await request('/mcp', { headers: { Authorization: bearer } })).status).toBe(405);
   });
 });
+
+describe('AI and calendar workflow', () => {
+  it('requires auth for every new surface and keeps provider failures explicit', async () => {
+    for (const path of ['/app/calendar', '/api/calendar', '/api/calendar/bridge'])
+      expect((await request(path)).status).toBe(401);
+    const unavailable = await request(
+      '/api/plans/propose',
+      {
+        method: 'POST',
+        headers: { Authorization: bearer, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config, notes: '' }),
+      },
+      { ...env, AI: undefined },
+    );
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.text()).toContain('not enabled');
+  });
+  it('saves a reviewed AI suggestion through the actual form and enforces a durable daily budget', async () => {
+    const ai = {
+      run: async () => ({
+        response: {
+          config,
+          rationale: 'Maintain a comfortable baseline and review available time before starting.',
+        },
+      }),
+    };
+    const bindings = { ...env, AI: ai };
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(config)) {
+      if (Array.isArray(value))
+        value.forEach((v) => {
+          form.append(key, String(v));
+        });
+      else form.set(key, String(value));
+    }
+    form.set('notes', 'Work around my calendar');
+    const result = await request(
+      '/app/plans/propose',
+      { method: 'POST', headers: { Authorization: basic, Origin: ORIGIN }, body: form },
+      bindings,
+    );
+    expect(result.status).toBe(200);
+    const html = await result.text();
+    expect(html).toContain('Maintain a comfortable baseline');
+    const draft = html.match(/name="draftId" value="([^"]+)"/);
+    expect(draft).not.toBeNull();
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM plans').first('count')).toBe(0);
+    form.set('draftId', draft?.[1] ?? '');
+    const saved = await request(
+      '/app/plans',
+      { method: 'POST', headers: { Authorization: basic, Origin: ORIGIN }, body: form },
+      bindings,
+    );
+    expect(saved.status).toBe(303);
+    const plan = await env.DB.prepare('SELECT data FROM plans').first<string>('data');
+    expect(JSON.parse(plan ?? '{}').ai.rationale).toContain('comfortable baseline');
+    await env.DB.prepare("UPDATE connection SET value='20' WHERE id LIKE 'ai_usage:%'").run();
+    const limited = await request(
+      '/api/plans/propose',
+      {
+        method: 'POST',
+        headers: { Authorization: bearer, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config, notes: '' }),
+      },
+      bindings,
+    );
+    expect(limited.status).toBe(429);
+  });
+});

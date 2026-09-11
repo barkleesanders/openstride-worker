@@ -75,7 +75,11 @@ export function connectUrl(env: Bindings, state: string): string {
 async function request(url: string, init: RequestInit): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) });
+    response = await fetch(url, {
+      ...init,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15000),
+    });
   } catch {
     throw new Error('Strava could not be reached. Try again later.');
   }

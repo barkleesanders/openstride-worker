@@ -142,3 +142,14 @@ describe('Strava adapter', () => {
     );
   });
 });
+
+it('rejects redirects using the Workers-supported manual redirect mode', async () => {
+  const mock = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(null, { status: 302, headers: { Location: 'https://elsewhere.test' } }),
+    );
+  vi.stubGlobal('fetch', mock);
+  await expect(fetchActivities(tokens)).rejects.toThrow('HTTP 302');
+  expect(mock.mock.calls[0][1].redirect).toBe('manual');
+});

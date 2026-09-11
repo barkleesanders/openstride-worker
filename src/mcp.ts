@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calendarSettingsSchema } from './calendar';
 import { planConfigSchema } from './engine';
 import {
   activityInputSchema,
@@ -9,6 +10,12 @@ import {
 
 const id = z.string().min(1).max(100);
 export const toolSchemas = {
+  propose_plan: z
+    .object({ config: planConfigSchema, notes: z.string().max(2000).default('') })
+    .strict(),
+  calendar_status: z.object({}).strict(),
+  configure_calendar: calendarSettingsSchema,
+  sync_plan_calendar: z.object({ planId: id, enabled: z.boolean() }).strict(),
   list_plans: z.object({}).strict(),
   get_plan: z.object({ planId: id }).strict(),
   create_plan: planConfigSchema,
@@ -24,6 +31,13 @@ export const toolSchemas = {
   disconnect_strava: z.object({}).strict(),
 };
 const descriptions: Record<string, string> = {
+  propose_plan:
+    'Ask the Worker LLM for a reviewed training configuration using recent runs and calendar availability; does not save a plan.',
+  calendar_status: 'Read connected calendars, settings and latest availability snapshot.',
+  configure_calendar:
+    'Select availability calendars, workout destination and local training window.',
+  sync_plan_calendar:
+    'Enable or disable calendar synchronization for one plan; requires runner intent.',
   list_plans: 'List the ten most recent running plans.',
   get_plan: 'Read a complete running plan.',
   create_plan: 'Create a running plan using transparent training rules.',
