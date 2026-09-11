@@ -35,7 +35,8 @@ app.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'none'"],
+      scriptSrc: ['https://static.cloudflareinsights.com'],
+      connectSrc: ["'self'", 'https://cloudflareinsights.com'],
       styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],

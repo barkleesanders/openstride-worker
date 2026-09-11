@@ -161,7 +161,9 @@ describe('HTTP security and workflow with actual D1', () => {
     const read = await request('/api/plans', { headers: { Authorization: bearer } });
     expect(read.status).toBe(200);
     expect(read.headers.get('Cache-Control')).toBe('no-store');
-    expect(read.headers.get('Content-Security-Policy')).toContain("script-src 'none'");
+    expect(read.headers.get('Content-Security-Policy')).toContain(
+      'script-src https://static.cloudflareinsights.com',
+    );
   });
   it('requires same-origin browser mutations and rejects cross-origin bearer requests', async () => {
     const formPage = await request('/app/new', { headers: { Authorization: basic } });
