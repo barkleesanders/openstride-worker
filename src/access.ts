@@ -39,10 +39,13 @@ async function signingKeys(issuer: string, kid: string): Promise<SigningKey[]> {
   if (loading?.issuer === issuer) return (await loading.promise).keys;
   const promise = (async (): Promise<KeyCache> => {
     const response = await fetch(`${issuer}/cdn-cgi/access/certs`, {
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
-    if (!response.ok) throw new Error('Access signing keys unavailable');
+    if (!response.ok) {
+      console.warn(JSON.stringify({ event: 'access_keys_unavailable', status: response.status }));
+      throw new Error('Access signing keys unavailable');
+    }
     const body = (await response.json()) as { keys?: SigningKey[] };
     if (!Array.isArray(body.keys) || body.keys.length === 0 || body.keys.length > 20) {
       throw new Error('Invalid Access signing keys');
@@ -73,7 +76,13 @@ async function signingKeys(issuer: string, kid: string): Promise<SigningKey[]> {
 export async function verifyAccess(request: Request, config: AccessConfig): Promise<boolean> {
   if (!isAccessConfigured(config)) return false;
   const token = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!token || token.length > 16384) return false;
+  if (!token || token.length > 16384) {
+    console.warn(
+      JSON.stringify({ event: 'access_rejected', reason: 'missing_or_oversized_assertion' }),
+    );
+    return false;
+  }
+  let stage = 'decode';
   try {
     const { header, payload: unverified } = decode(token);
     if (header.alg !== 'RS256' || !header.kid || typeof header.kid !== 'string') return false;
@@ -83,13 +92,23 @@ export async function verifyAccess(request: Request, config: AccessConfig): Prom
     }
     const issuer = issuerFor(config);
     if (!issuer || !config.CF_ACCESS_AUD) return false;
+    stage = 'signing_keys';
+    const keys = await signingKeys(issuer, header.kid);
+    stage = 'signature';
     const payload = await verifyWithJwks(token, {
-      keys: await signingKeys(issuer, header.kid),
+      keys,
       allowedAlgorithms: ['RS256'],
       verification: { iss: issuer, aud: config.CF_ACCESS_AUD, exp: true, nbf: true, iat: true },
     });
     return typeof payload.email === 'string' && payload.email === config.OWNER_EMAIL;
-  } catch {
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: 'access_rejected',
+        reason: stage,
+        kind: error instanceof Error ? error.name : 'unknown',
+      }),
+    );
     // Do not log assertions or health-account identity on authentication failures.
     return false;
   }

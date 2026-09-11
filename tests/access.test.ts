@@ -73,7 +73,7 @@ describe('Cloudflare Access origin verification', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       `https://${config.CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`,
     );
-    expect(fetchMock.mock.calls[0][1].redirect).toBe('error');
+    expect(fetchMock.mock.calls[0][1].redirect).toBe('manual');
   });
   it.each([
     { aud: ['another-app'] },
