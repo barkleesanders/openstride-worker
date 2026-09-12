@@ -32,7 +32,15 @@ function DistanceUnit() {
   );
 }
 
-export function Layout({ title, children }: { title: string; children: Child }) {
+export function Layout({
+  title,
+  children,
+  publicHome = false,
+}: {
+  title: string;
+  children: Child;
+  publicHome?: boolean;
+}) {
   return (
     <html lang="en">
       <head>
@@ -40,6 +48,36 @@ export function Layout({ title, children }: { title: string; children: Child }) 
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="color-scheme" content="light" />
         <title>{title} · OpenStride</title>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        {publicHome && (
+          <>
+            <meta
+              name="description"
+              content="A personal running planner. Build a weekly rhythm, track your progress, and adjust your plan when life happens."
+            />
+            <link rel="canonical" href="https://openstride.barkleesanders.com/" />
+            <meta property="og:type" content="website" />
+            <meta property="og:site_name" content="OpenStride" />
+            <meta property="og:title" content="OpenStride — Your pace. Your plan." />
+            <meta
+              property="og:description"
+              content="Build a weekly running rhythm and track your progress."
+            />
+            <meta property="og:url" content="https://openstride.barkleesanders.com/" />
+            <meta property="og:image" content="https://openstride.barkleesanders.com/og.png" />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="630" />
+            <meta property="og:image:alt" content="OpenStride — Your pace. Your plan." />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content="OpenStride — Your pace. Your plan." />
+            <meta
+              name="twitter:description"
+              content="Build a weekly running rhythm and track your progress."
+            />
+            <meta name="twitter:image" content="https://openstride.barkleesanders.com/og.png" />
+            <meta name="twitter:image:alt" content="OpenStride — Your pace. Your plan." />
+          </>
+        )}
         <link rel="stylesheet" href="/styles.css" />
         <script src="/units.js" defer></script>
       </head>
@@ -138,6 +176,21 @@ export function Home({ accessLogin = false }: { accessLogin?: boolean }) {
         <p class="quiet">
           Manual planning is also available. Apple Health and Android Health Connect need an
           on-device companion; this web app does not connect to them directly.
+        </p>
+      </section>
+      <section class="note-panel" aria-labelledby="veteran-resource-heading">
+        <h2 id="veteran-resource-heading">A resource for veterans.</h2>
+        <p>
+          Preparing a VA disability claim? AIVA Claims helps veterans organize medical records and
+          prepare claim documents. You review the documents and submit your own claim to the VA.
+        </p>
+        <p>
+          <a
+            class="text-link"
+            href="https://aivaclaims.com/?utm_source=openstride&utm_medium=referral&utm_campaign=veteran_resources"
+          >
+            Explore AIVA Claims
+          </a>
         </p>
       </section>
     </>

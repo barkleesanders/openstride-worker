@@ -196,7 +196,7 @@ async function jsonBody(request: Request) {
 const easeSchema = z.object({ startDate: dateSchema }).strict();
 app.get('/', (c) =>
   c.html(
-    <Layout title="Your running, your way">
+    <Layout title="Your running, your way" publicHome>
       <Home accessLogin={isAccessConfigured(c.env)} />
     </Layout>,
   ),
@@ -660,6 +660,17 @@ app.all('/mcp', (c) => {
   return c.json({ error: 'This stateless MCP endpoint accepts POST requests.' }, 405);
 });
 app.get('/security.txt', (c) => c.redirect('/.well-known/security.txt', 301));
+app.get('/sitemap.xml', (c) => {
+  c.header('Content-Type', 'application/xml');
+  return c.body(
+    '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://openstride.barkleesanders.com/</loc><lastmod>2026-09-11</lastmod></url></urlset>',
+  );
+});
+app.get('/robots.txt', (c) =>
+  c.text(
+    'User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /api/\nDisallow: /mcp\nSitemap: https://openstride.barkleesanders.com/sitemap.xml\n',
+  ),
+);
 app.notFound((c) => c.json({ error: 'Not found.' }, 404));
 app.onError((error, c) => {
   console.warn(
