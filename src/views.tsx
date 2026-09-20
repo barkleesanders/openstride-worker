@@ -49,6 +49,11 @@ export function Layout({
         <meta name="color-scheme" content="light" />
         <title>{title} · OpenStride</title>
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        {/* Safari/bookmarks/crawlers request /favicon.ico regardless of the SVG link;
+            both files sit in public/ next to favicon.svg, rasterized from it by
+            ~/tools/favicon-pack. */}
+        <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         {publicHome && (
           <>
             <meta
