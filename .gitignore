@@ -11,3 +11,9 @@ coverage/
 
 *-backup.sql
 .ship/
+
+# silent-outcome probe (Playwright symlinked in, outputs beside the script)
+tests/node_modules
+tests/probe-*.json
+tests/probe-*.png
+.silent-outcome-probe.log

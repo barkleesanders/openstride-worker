@@ -16,7 +16,8 @@
     "build": "wrangler deploy --dry-run --outdir dist --config wrangler.jsonc",
     "db:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
     "db:remote": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
-    "deploy": "wrangler deploy --config wrangler.jsonc"
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "probe:constrained": "node tests/probe-constrained.mjs probe"
   },
   "dependencies": {
     "hono": "4.13.7",
