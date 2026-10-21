@@ -106,7 +106,7 @@ describe('calendar scheduling and sync receipts', () => {
     expect(freeSlots('2026-09-14', settings, value)).toEqual([]);
   });
   it('never labels missing, stale or uncovered calendar data as connected', () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-11T12:00:00Z'));
     const value = snapshot();
     expect(calendarContext(settings, value, '2026-09-14', 4).connected).toBe(true);
@@ -231,7 +231,7 @@ describe('calendar scheduling and sync receipts', () => {
     expect((await calendarState(db)).snapshot?.receipts).toHaveLength(2);
   });
   it('preserves completed and past events when a subscription is disabled', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-11T12:00:00Z'));
     const workouts = [
       { id: 'past', date: '2026-09-10', status: 'planned' },
@@ -249,7 +249,7 @@ describe('calendar scheduling and sync receipts', () => {
     expect(bridge.desired[0].fingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
   it('requires matching content fingerprints before reporting sync current', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-11T12:00:00Z'));
     const plan = {
       id: 'plan',

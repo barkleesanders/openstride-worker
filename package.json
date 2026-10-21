@@ -12,7 +12,9 @@
     "dev": "wrangler dev --config wrangler.jsonc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test",
+    "lint": "biome check . --error-on-warnings",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run check:runtime",
+    "check:runtime": "node scripts/check-runtime.mjs",
     "build": "wrangler deploy --dry-run --outdir dist --config wrangler.jsonc",
     "db:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
     "db:remote": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
@@ -20,14 +22,16 @@
     "probe:constrained": "node tests/probe-constrained.mjs probe"
   },
   "dependencies": {
-    "hono": "4.13.7",
+    "hono": "4.13.13",
     "zod": "4.6.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260911.1",
+    "@biomejs/biome": "2.5.14",
+    "@cloudflare/workers-types": "5.20261021.1",
     "@types/node": "22.20.2",
+    "miniflare": "5.20261019.1-beta",
     "typescript": "7.0.2",
     "vitest": "5.0.0",
-    "wrangler": "4.131.1"
+    "wrangler": "4.151.3"
   }
 }

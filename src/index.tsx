@@ -202,7 +202,11 @@ app.get('/', (c) =>
   ),
 );
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
-app.get('/styles.css', (c) => c.env.ASSETS.fetch(c.req.raw));
+app.get('/styles.css', async (c) => {
+  const response = await c.env.ASSETS.fetch(c.req.raw);
+  // Asset responses have immutable headers; security middleware adds headers after next().
+  return new Response(response.body, response);
+});
 app.get('/app', async (c) => {
   const [plans, activities, status] = await Promise.all([
     listPlans(c.env.DB),
