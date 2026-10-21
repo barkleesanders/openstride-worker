@@ -7,11 +7,15 @@ import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 const token = 'fixture-only-openstride-runtime-token-12345678';
 const runtime = new Miniflare(
   convertV4MiniflareOptions({
+    cf: false,
     modules: true,
     scriptPath: 'dist/index.js',
     compatibilityDate: '2026-09-10',
     bindings: { APP_TOKEN: token },
     d1Databases: ['DB'],
+    outboundService() {
+      throw new Error('External requests are forbidden in the runtime check.');
+    },
     assets: {
       directory: 'public',
       binding: 'ASSETS',
