@@ -305,12 +305,14 @@ async function recommend(env: Bindings, input: unknown) {
     });
     const draftId = crypto.randomUUID(),
       generatedAt = new Date().toISOString();
-    await env.DB.prepare('INSERT INTO connection(id,value,updated_at) VALUES(?,?,?)')
-      .bind(`ai_draft:${draftId}`, JSON.stringify({ ...proposal, generatedAt }), generatedAt)
-      .run();
-    await env.DB.prepare("DELETE FROM connection WHERE id LIKE 'ai_draft:%' AND updated_at < ?")
-      .bind(new Date(Date.now() - 86400000).toISOString())
-      .run();
+    await Promise.all([
+      env.DB.prepare('INSERT INTO connection(id,value,updated_at) VALUES(?,?,?)')
+        .bind(`ai_draft:${draftId}`, JSON.stringify({ ...proposal, generatedAt }), generatedAt)
+        .run(),
+      env.DB.prepare("DELETE FROM connection WHERE id LIKE 'ai_draft:%' AND updated_at < ?")
+        .bind(new Date(Date.now() - 86400000).toISOString())
+        .run(),
+    ]);
     console.info(
       JSON.stringify({
         event: 'ai_plan_proposed',
