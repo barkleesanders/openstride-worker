@@ -23,9 +23,23 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Native observability (Cloudflare-first, no external/paid products):
+  // Workers Logs + Workers Traces, persisted. Sampling stays at the
+  // site's deliberate 0.1. Guarded by `npm run lint:observability`.
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0.1
+    "head_sampling_rate": 0.1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 0.1
+    },
+    "traces": {
+      "enabled": true,
+      "persist": true,
+      "head_sampling_rate": 0.1
+    }
   },
   "ai": {
     "binding": "AI",

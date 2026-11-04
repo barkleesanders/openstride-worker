@@ -41,8 +41,12 @@ import * as strava from './strava';
 import type { Bindings, PlanConfig } from './types';
 import { inputKm } from './units';
 import { Dashboard, ErrorPage, Home, Layout, NewPlan, PlanPage } from './views';
+import { wideEvent } from './wide-event';
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+// Wide-event logging: one structured http_request event per request.
+app.use(wideEvent);
 app.use(
   '*',
   secureHeaders({
