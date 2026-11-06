@@ -41,8 +41,14 @@ import * as strava from './strava';
 import type { Bindings, PlanConfig } from './types';
 import { inputKm } from './units';
 import { Dashboard, ErrorPage, Home, Layout, NewPlan, PlanPage } from './views';
+import { wideEvent } from './wide-event';
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+// Wide-event logging — outermost middleware, one JSON http_request event
+// per request to Workers Logs (see src/wide-event.ts). It also owns the
+// per-request D1 query counter behind db_queries / db_batches.
+app.use('*', wideEvent);
 app.use(
   '*',
   secureHeaders({
