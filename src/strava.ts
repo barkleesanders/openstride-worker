@@ -162,11 +162,25 @@ export async function fetchActivities(tokens: StravaTokens, after?: number): Pro
     }));
 }
 
+// The encryption key is a pure function of env.APP_TOKEN (SHA-256 digest ->
+// AES-GCM import), identical for every request in an isolate. Memoise the
+// in-flight/resolved promise keyed by the exact token value (never logged);
+// a rotated token misses and derives fresh. Rejections are evicted.
+let tokenKeyCache: { token: string; key: Promise<CryptoKey> } | null = null;
+
 async function encryptionKey(env: Bindings): Promise<CryptoKey> {
   if (!env.APP_TOKEN || env.APP_TOKEN.length < 32)
     throw new Error('APP_TOKEN must have at least 32 characters to protect Strava tokens.');
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(env.APP_TOKEN));
-  return crypto.subtle.importKey('raw', hash, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  if (tokenKeyCache && tokenKeyCache.token === env.APP_TOKEN) return tokenKeyCache.key;
+  const pending = (async () => {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(env.APP_TOKEN));
+    return crypto.subtle.importKey('raw', hash, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  })();
+  pending.catch(() => {
+    if (tokenKeyCache?.key === pending) tokenKeyCache = null;
+  });
+  tokenKeyCache = { token: env.APP_TOKEN, key: pending };
+  return pending;
 }
 
 export async function encryptTokens(env: Bindings, tokens: StravaTokens): Promise<string> {
