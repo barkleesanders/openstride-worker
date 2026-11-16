@@ -23,7 +23,7 @@
     "probe:constrained": "node tests/probe-constrained.mjs probe"
   },
   "dependencies": {
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "zod": "4.6.7"
   },
   "devDependencies": {
